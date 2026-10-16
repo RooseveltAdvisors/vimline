@@ -84,6 +84,13 @@ func (e *Editor) String() string { return string(e.text) }
 // Text returns the buffer contents.
 func (e *Editor) Text() string { return string(e.text) }
 
+// SetMode forces the editing mode. Consumers use it to refocus a field in
+// insert after a mode change elsewhere.
+func (e *Editor) SetMode(m Mode) { e.mode = m }
+
+// End puts the cursor after the last character.
+func (e *Editor) End() { e.cursor = len(e.text) }
+
 // PendingJ reports whether insert mode is holding one j for a possible jj.
 func (e *Editor) Cursor() int { return e.cursor }
 
