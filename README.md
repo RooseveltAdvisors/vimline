@@ -69,3 +69,16 @@ Tagged releases only. Pin deliberately; do not float a branch head.
 ## License
 
 MIT.
+
+## Consumers and the drift gate
+
+herdr-recall imports this module at a tagged release and its full suite runs
+against the module, so every release is proven by a real consumer.
+
+superhuman (RooseveltAdvisors/superhuman) integrates the module and runs
+`editor_test.go` and `duration/duration_test.go` unmodified in CI, so any
+drift between the two surfaces fails a build instead of a code review. The CI
+job name is linked here when V2 lands.
+
+The routing rule for gaps: a consumer that needs different behavior sends the
+gap upstream to this module. Neither side patches around the module locally.
