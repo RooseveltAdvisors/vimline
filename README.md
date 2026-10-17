@@ -100,10 +100,16 @@ MIT.
 herdr-recall imports this module at a tagged release and its full suite runs
 against the module, so every release is proven by a real consumer.
 
-superhuman (RooseveltAdvisors/superhuman) integrates the module and runs
-`editor_test.go` and `duration/duration_test.go` unmodified in CI, so any
-drift between the two surfaces fails a build instead of a code review. The CI
-job name is linked here when V2 lands.
+superhuman (RooseveltAdvisors/superhuman) migrated in PR #32 (commit `705924f`):
+its four prefixes (g, Z, space, d) run on the Dispatcher and its hand-rolled
+pending flags are deleted. Its `vimline-contract` CI job pins this module and
+runs `vimline`, `vimline/duration`, and `vimline/keys` tests unmodified, so
+any drift between the two surfaces fails a build instead of a code review.
 
 The routing rule for gaps: a consumer that needs different behavior sends the
 gap upstream to this module. Neither side patches around the module locally.
+
+One pin rule learned the hard way (superhuman's 705924f raced its own gate,
+fixed forward in 08a708f within the hour): a consumer bumps its vimline pin
+and the code using the new API in the same commit, so the drift gate never
+asserts yesterday's version against today's code.
