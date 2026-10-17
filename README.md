@@ -58,6 +58,31 @@ These seven behaviors are the contract. `editor_test.go` and
 7. `0` is the start-of-line motion unless a count is already running, when it
    is a digit, so `10l` moves ten cells right.
 
+## The keys package (v0.2.0)
+
+`vimline/keys` owns the chord layer. `Split` decodes one terminal read into
+logical key names in order, so a burst like `ggt` in a single read keeps every
+key and no prefix state is lost to read batching. `Dispatcher` runs the
+pending-prefix machine:
+
+```go
+d := keys.New()
+d.Register("g", map[string]string{"g": "first", "t": "next-account"}, "t account")
+switch a, r := d.Feed(key); r {
+case keys.Chord:   // a.Name completed, a.Count rode it
+case keys.Consumed: // count, prefix, or cancellation: do nothing
+case keys.Pass:    // yours: pair it with d.TakeCount() when a count ran
+}
+```
+
+The discipline is binding and test-pinned: one pending prefix at a time, a
+count rides the chord and survives across the prefix, a key matching no
+continuation cancels and is swallowed, `esc` cancels clean, and no timers.
+Bare `0` passes through so surfaces can bind it; `0` inside a running count is
+a digit. The machine ships with zero chords registered: every consumer owns
+its table, so `gt` can mean accounts on one surface and tabs on another
+without coupling releases.
+
 ## Install
 
 ```
