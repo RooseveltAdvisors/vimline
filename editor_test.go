@@ -261,3 +261,24 @@ func TestCountZeroIsAMotionUnlessCountRunning(t *testing.T) {
 		t.Fatalf("10l cursor = %d, want 10", e.Cursor())
 	}
 }
+
+func TestEscAfterBackspacePastInsertStartDoesNotPanic(t *testing.T) {
+	e := New("")
+	typeKeys(e, "i")
+	for range 8 {
+		typeKeys(e, "a")
+	}
+	typeKeys(e, "<bs>")
+	typeKeys(e, "<bs>")
+	typeKeys(e, "<esc>")
+	if e.Mode() != ModeNormal {
+		t.Fatal("esc did not leave insert")
+	}
+	e = New("hello")
+	typeKeys(e, "A")
+	typeKeys(e, "<ctrl-u>")
+	typeKeys(e, "<esc>")
+	if e.Mode() != ModeNormal {
+		t.Fatal("esc after ctrl-u did not leave insert")
+	}
+}

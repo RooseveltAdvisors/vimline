@@ -379,7 +379,25 @@ func (e *Editor) endChange() {
 	e.inChange = false
 	kind := e.changeM
 	count := e.changeCount
-	ins := append([]rune(nil), e.text[e.changeFrom:e.cursor]...)
+	from, to := e.changeFrom, e.cursor
+	if from < 0 {
+		from = 0
+	}
+	if to < 0 {
+		to = 0
+	}
+	if from > len(e.text) {
+		from = len(e.text)
+	}
+	if to > len(e.text) {
+		to = len(e.text)
+	}
+	// Backspace, Ctrl+U, and left can move the cursor behind the insert
+	// start. Slicing [from:to] then panics. Keep the repeat text empty.
+	if from > to {
+		from = to
+	}
+	ins := append([]rune(nil), e.text[from:to]...)
 	e.lastEdit = func(ed *Editor) {
 		switch kind {
 		case 'i', 'I':
