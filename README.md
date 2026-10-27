@@ -3,13 +3,14 @@
 A framework-neutral vim line editor and human time grammar for Go. The state
 machine lives here; every consumer renders.
 
-Two packages:
+Three packages:
 
 - `vimline` - the editor: modal insert, normal, and replace states, motions,
   operators with counts, one unnamed register, undo and redo, replace mode,
   dot repeat, and the `jj` exit idiom.
 - `vimline/duration` - the time grammar: `3h`, `2w`, `1d12h`, `tomorrow`,
   `clear`, resolving to an absolute time plus a human description.
+- `vimline/keys` - the chord layer: `Split` and `Dispatcher`, detailed below.
 
 No bubbletea, lipgloss, tcell, or ANSI anywhere in the module. `Editor.View`
 returns a plain-data snapshot and the consumer paints it.
@@ -89,7 +90,9 @@ without coupling releases.
 go get github.com/RooseveltAdvisors/vimline@v0.1.0
 ```
 
-Tagged releases only. Pin deliberately; do not float a branch head.
+Tagged releases only. Pin deliberately; do not float a branch head. The pinned
+toolchain is Go 1.26.x; `.github/workflows/ci.yml` is the authority for that
+version.
 
 ## License
 
@@ -105,6 +108,10 @@ its four prefixes (g, Z, space, d) run on the Dispatcher and its hand-rolled
 pending flags are deleted. Its `vimline-contract` CI job pins this module and
 runs `vimline`, `vimline/duration`, and `vimline/keys` tests unmodified, so
 any drift between the two surfaces fails a build instead of a code review.
+
+This module also runs its own gate. `.github/workflows/ci.yml` runs
+`go vet ./...` and `go test -count=1 ./...` on every pull request and on each
+push to `main`, so a red `vimline` main surfaces on its own check run.
 
 The routing rule for gaps: a consumer that needs different behavior sends the
 gap upstream to this module. Neither side patches around the module locally.
