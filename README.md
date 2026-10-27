@@ -3,13 +3,14 @@
 A framework-neutral vim line editor and human time grammar for Go. The state
 machine lives here; every consumer renders.
 
-Two packages:
+Three packages:
 
 - `vimline` - the editor: modal insert, normal, and replace states, motions,
   operators with counts, one unnamed register, undo and redo, replace mode,
   dot repeat, and the `jj` exit idiom.
 - `vimline/duration` - the time grammar: `3h`, `2w`, `1d12h`, `tomorrow`,
   `clear`, resolving to an absolute time plus a human description.
+- `vimline/keys` - the chord layer: `Split` and `Dispatcher`, detailed below.
 
 No bubbletea, lipgloss, tcell, or ANSI anywhere in the module. `Editor.View`
 returns a plain-data snapshot and the consumer paints it.
