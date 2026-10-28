@@ -91,6 +91,12 @@ func (e *Editor) SetMode(m Mode) { e.mode = m }
 // End puts the cursor after the last character.
 func (e *Editor) End() { e.cursor = len(e.text) }
 
+// SetCursor moves the cursor and clamps it to the buffer.
+func (e *Editor) SetCursor(p int) {
+	e.cursor = p
+	e.clamp()
+}
+
 // PendingJ reports whether insert mode is holding one j for a possible jj.
 func (e *Editor) Cursor() int { return e.cursor }
 
@@ -255,14 +261,14 @@ func (e *Editor) move(m rune, count int) (int, bool) {
 			p = n
 		}
 	case '0':
-		p = 0
+		p, _, _, _ = e.lineAt(p)
 	case '^':
-		p = 0
+		p, _, _, _ = e.lineAt(p)
 		for p < n && e.text[p] == ' ' {
 			p++
 		}
 	case '$':
-		p = n
+		_, p, _, _ = e.lineAt(p)
 	case 'w', 'W':
 		for i := 0; i < count; i++ {
 			p = e.wordForward(p, m == 'W')
@@ -297,6 +303,34 @@ func (e *Editor) move(m rune, count int) (int, bool) {
 	return p, true
 }
 
+// lineAt returns the current line. content is the text without the break.
+// del includes the newline, or the preceding newline on the last line, so dd
+// removes one line and does not erase the rest of the buffer.
+func (e *Editor) lineAt(p int) (contentStart, contentEnd, delStart, delEnd int) {
+	n := len(e.text)
+	if p > n {
+		p = n
+	}
+	if p < 0 {
+		p = 0
+	}
+	contentStart = p
+	for contentStart > 0 && e.text[contentStart-1] != '\n' {
+		contentStart--
+	}
+	contentEnd = p
+	for contentEnd < n && e.text[contentEnd] != '\n' {
+		contentEnd++
+	}
+	delStart, delEnd = contentStart, contentEnd
+	if contentEnd < n && e.text[contentEnd] == '\n' {
+		delEnd = contentEnd + 1
+	} else if contentStart > 0 {
+		delStart = contentStart - 1
+	}
+	return contentStart, contentEnd, delStart, delEnd
+}
+
 // rangeFor maps an operator motion onto a half-open [start,end) span.
 func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 	start := e.cursor
@@ -308,7 +342,8 @@ func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 	case 'b', 'B', '0', '^':
 		return target, e.cursor, true
 	case '$':
-		return e.cursor, len(e.text), true
+		_, end, _, _ := e.lineAt(e.cursor)
+		return e.cursor, end, true
 	}
 	if target < start {
 		return target, start, true
@@ -427,12 +462,18 @@ func (e *Editor) operate(op, m rune, count int) {
 	if m == op {
 		switch op {
 		case 'y':
-			e.reg = append([]rune(nil), e.text...)
+			_, _, ds, de := e.lineAt(e.cursor)
+			e.reg = append([]rune(nil), e.text[ds:de]...)
 		case 'd':
-			e.deleteRange(0, len(e.text))
-			e.lastEdit = func(ed *Editor) { ed.deleteRange(0, len(ed.text)) }
+			_, _, ds, de := e.lineAt(e.cursor)
+			e.deleteRange(ds, de)
+			e.lastEdit = func(ed *Editor) {
+				_, _, a, b := ed.lineAt(ed.cursor)
+				ed.deleteRange(a, b)
+			}
 		case 'c':
-			e.deleteRange(0, len(e.text))
+			cs, ce, _, _ := e.lineAt(e.cursor)
+			e.deleteRange(cs, ce)
 			e.beginChange('L', 1)
 			e.mode = ModeInsert
 		}
@@ -802,11 +843,16 @@ func (e *Editor) feedNormal(key string) Action {
 			e.pending = r
 			return ActStay
 		case 'D':
-			e.deleteRange(e.cursor, len(e.text))
-			e.lastEdit = func(ed *Editor) { ed.deleteRange(ed.cursor, len(ed.text)) }
+			_, end, _, _ := e.lineAt(e.cursor)
+			e.deleteRange(e.cursor, end)
+			e.lastEdit = func(ed *Editor) {
+				_, lineEnd, _, _ := ed.lineAt(ed.cursor)
+				ed.deleteRange(ed.cursor, lineEnd)
+			}
 			return ActStay
 		case 'C':
-			e.deleteRange(e.cursor, len(e.text))
+			_, end, _, _ := e.lineAt(e.cursor)
+			e.deleteRange(e.cursor, end)
 			e.beginChange('C', 1)
 			e.mode = ModeInsert
 			return ActStay

@@ -113,6 +113,11 @@ func TestOperatorsAndCounts(t *testing.T) {
 	e = newNormal("alpha beta")
 	typeKeys(e, "0dd")
 	want(t, e, "", "dd")
+
+	e = newNormal("one\ntwo\nthree")
+	e.cursor = 4
+	typeKeys(e, "dd")
+	want(t, e, "one\nthree", "dd one line")
 }
 
 func TestCharsReplaceAndCase(t *testing.T) {
