@@ -97,6 +97,14 @@ func (e *Editor) SetCursor(p int) {
 	e.clamp()
 }
 
+// InsertLiteral inserts literal runes at the cursor while preserving undo history.
+func (e *Editor) InsertLiteral(s string) {
+	if s == "" {
+		return
+	}
+	e.insertRunes([]rune(s))
+}
+
 // PendingJ reports whether insert mode is holding one j for a possible jj.
 func (e *Editor) Cursor() int { return e.cursor }
 
@@ -331,6 +339,46 @@ func (e *Editor) lineAt(p int) (contentStart, contentEnd, delStart, delEnd int) 
 	return contentStart, contentEnd, delStart, delEnd
 }
 
+// lineSpanDelta returns the line-wise content and delete span covering the
+// current line plus delta lines (+count for j, -count for k).
+func (e *Editor) lineSpanDelta(p, delta int) (contentStart, contentEnd, delStart, delEnd int) {
+	starts := []int{0}
+	for i, r := range e.text {
+		if r == '\n' {
+			starts = append(starts, i+1)
+		}
+	}
+	cur := 0
+	for i, s := range starts {
+		if s <= p {
+			cur = i
+		}
+	}
+	other := cur + delta
+	if other < 0 {
+		other = 0
+	}
+	if other >= len(starts) {
+		other = len(starts) - 1
+	}
+	first, last := cur, other
+	if first > last {
+		first, last = last, first
+	}
+	contentStart = starts[first]
+	contentEnd = len(e.text)
+	if last+1 < len(starts) {
+		contentEnd = starts[last+1] - 1
+	}
+	delStart, delEnd = contentStart, contentEnd
+	if contentEnd < len(e.text) && e.text[contentEnd] == '\n' {
+		delEnd = contentEnd + 1
+	} else if contentStart > 0 {
+		delStart = contentStart - 1
+	}
+	return contentStart, contentEnd, delStart, delEnd
+}
+
 // rangeFor maps an operator motion onto a half-open [start,end) span.
 func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 	start := e.cursor
@@ -474,6 +522,30 @@ func (e *Editor) operate(op, m rune, count int) {
 		case 'c':
 			cs, ce, _, _ := e.lineAt(e.cursor)
 			e.deleteRange(cs, ce)
+			e.beginChange('L', 1)
+			e.mode = ModeInsert
+		}
+		return
+	}
+	if m == 'j' || m == 'k' {
+		delta := count
+		if m == 'k' {
+			delta = -count
+		}
+		cs, ce, ds, de := e.lineSpanDelta(e.cursor, delta)
+		switch op {
+		case 'y':
+			e.reg = append([]rune(nil), e.text[ds:de]...)
+		case 'd':
+			e.deleteRange(ds, de)
+			d := delta
+			e.lastEdit = func(ed *Editor) {
+				_, _, a, b := ed.lineSpanDelta(ed.cursor, d)
+				ed.deleteRange(a, b)
+			}
+		case 'c':
+			e.deleteRange(cs, ce)
+			e.cursor = cs
 			e.beginChange('L', 1)
 			e.mode = ModeInsert
 		}
