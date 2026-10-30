@@ -7,6 +7,7 @@ package vimline
 
 import (
 	"unicode"
+	"unicode/utf8"
 )
 
 // edit.go is the shared vim-style line Editor. The search prompt, the sticky
@@ -52,8 +53,9 @@ type Editor struct {
 	cursor int
 	mode   Mode
 
-	pending   rune // 'd', 'c', 'y', 'r', 'f', 'F', 't', 'T'
-	pendingOp rune // operator held while a find motion waits for its char
+	pending   rune // 'd', 'c', 'y', 'r', 'f', 'F', 't', 'T', 'i', 'a', 'g'
+	pendingOp rune // operator held while a multi-key motion or text object completes
+	opCount   int  // numeric prefix captured before the operator (multiplied with motion count)
 	count     int  // numeric prefix
 	pendingJ  bool // insert mode saw one j and may be half of jj
 
@@ -62,14 +64,20 @@ type Editor struct {
 	undo []undoSnap
 	redo []undoSnap
 
-	findCh  rune
-	findDir int
+	findCh   rune
+	findKind rune // 'f', 'F', 't', 'T'
+	findDir  int
 
 	// change tracks one insert session so '.' can replay it.
-	inChange    bool
-	changeM     rune
-	changeCount int
-	changeFrom  int
+	inChange     bool
+	changeM      rune
+	changeObj    rune
+	changeAround bool
+	changeFindK  rune
+	changeFindCh rune
+	changeRepeat bool
+	changeCount  int
+	changeFrom   int
 
 	lastEdit func(*Editor)
 }
@@ -90,6 +98,20 @@ func (e *Editor) SetMode(m Mode) { e.mode = m }
 
 // End puts the cursor after the last character.
 func (e *Editor) End() { e.cursor = len(e.text) }
+
+// SetCursor moves the cursor and clamps it to the buffer.
+func (e *Editor) SetCursor(p int) {
+	e.cursor = p
+	e.clamp()
+}
+
+// InsertLiteral inserts literal runes at the cursor while preserving undo history.
+func (e *Editor) InsertLiteral(s string) {
+	if s == "" {
+		return
+	}
+	e.insertRunes([]rune(s))
+}
 
 // PendingJ reports whether insert mode is holding one j for a possible jj.
 func (e *Editor) Cursor() int { return e.cursor }
@@ -140,7 +162,7 @@ func isWordRune(r rune) bool {
 }
 
 func (e *Editor) wordClass(r rune, big bool) int {
-	if r == ' ' {
+	if unicode.IsSpace(r) {
 		return 0
 	}
 	if big {
@@ -159,10 +181,12 @@ func (e *Editor) wordForward(p int, big bool) int {
 	}
 	start := e.wordClass(e.text[p], big)
 	i := p
-	for i < n && e.wordClass(e.text[i], big) == start {
-		i++
+	if start != 0 {
+		for i < n && e.wordClass(e.text[i], big) == start {
+			i++
+		}
 	}
-	for i < n && e.text[i] == ' ' {
+	for i < n && unicode.IsSpace(e.text[i]) {
 		i++
 	}
 	return i
@@ -173,7 +197,7 @@ func (e *Editor) wordBack(p int, big bool) int {
 		return 0
 	}
 	i := p - 1
-	for i > 0 && e.text[i] == ' ' {
+	for i > 0 && unicode.IsSpace(e.text[i]) {
 		i--
 	}
 	cls := e.wordClass(e.text[i], big)
@@ -189,7 +213,7 @@ func (e *Editor) wordEnd(p int, big bool) int {
 		return 0
 	}
 	i := p + 1
-	for i < n && e.text[i] == ' ' {
+	for i < n && unicode.IsSpace(e.text[i]) {
 		i++
 	}
 	if i >= n {
@@ -202,41 +226,13 @@ func (e *Editor) wordEnd(p int, big bool) int {
 	return i
 }
 
-// findChar runs f, F, t or T. findCh must already be set.
+// findChar runs f, F, t or T on the current line. findCh must already be set.
 func (e *Editor) findChar(m rune, count int) (int, bool) {
-	n := len(e.text)
-	if e.findCh == 0 {
-		return e.cursor, false
-	}
-	step := 1
-	if m == 'F' || m == 'T' {
-		step = -1
-	}
-	p := e.cursor
-	for i := 0; i < count; i++ {
-		q := p + step
-		for q >= 0 && q < n && e.text[q] != e.findCh {
-			q += step
-		}
-		if q < 0 || q >= n {
-			return e.cursor, false
-		}
-		p = q
-	}
-	if m == 't' {
-		p--
-	}
-	if m == 'T' {
-		p++
-	}
-	if p < 0 || p >= n {
-		return e.cursor, false
-	}
-	return p, true
+	return e.findCharLine(m, e.findCh, count, false)
 }
 
 // move applies one motion and returns the target cursor. ok is false when a
-// character search finds nothing, which in vim aborts the command.
+// character search or bracket match finds nothing, which in vim aborts the command.
 func (e *Editor) move(m rune, count int) (int, bool) {
 	if count < 1 {
 		count = 1
@@ -249,20 +245,22 @@ func (e *Editor) move(m rune, count int) (int, bool) {
 		if p < 0 {
 			p = 0
 		}
-	case 'l':
+	case 'l', ' ':
 		p += count
 		if p > n {
 			p = n
 		}
 	case '0':
-		p = 0
+		p, _, _, _ = e.lineAt(p)
 	case '^':
-		p = 0
-		for p < n && e.text[p] == ' ' {
+		p, _, _, _ = e.lineAt(p)
+		for p < n && isSpaceNotNL(e.text[p]) {
 			p++
 		}
+	case '_':
+		p = e.firstNonBlankDown(p, count)
 	case '$':
-		p = n
+		_, p, _, _ = e.lineAt(p)
 	case 'w', 'W':
 		for i := 0; i < count; i++ {
 			p = e.wordForward(p, m == 'W')
@@ -276,25 +274,113 @@ func (e *Editor) move(m rune, count int) (int, bool) {
 			p = e.wordEnd(p, m == 'E')
 		}
 	case 'f', 'F', 't', 'T':
-		return e.findChar(m, count)
+		return e.findCharLine(m, e.findCh, count, false)
 	case ';':
 		if e.findCh == 0 {
 			return p, false
 		}
-		if e.findDir < 0 {
-			return e.findChar('F', count)
+		k := e.findKind
+		if k == 0 {
+			if e.findDir < 0 {
+				k = 'F'
+			} else {
+				k = 'f'
+			}
 		}
-		return e.findChar('f', count)
+		return e.findCharLine(k, e.findCh, count, true)
 	case ',':
 		if e.findCh == 0 {
 			return p, false
 		}
-		if e.findDir < 0 {
-			return e.findChar('f', count)
+		k := e.findKind
+		if k == 0 {
+			if e.findDir < 0 {
+				k = 'f'
+			} else {
+				k = 'F'
+			}
+		} else {
+			k = reverseFindKind(k)
 		}
-		return e.findChar('F', count)
+		return e.findCharLine(k, e.findCh, count, true)
+	case '%':
+		return e.matchBracket(p)
+	case '{':
+		return e.paragraphMove(p, -1, count), true
+	case '}':
+		return e.paragraphMove(p, 1, count), true
+	default:
+		return p, false
 	}
 	return p, true
+}
+
+// lineAt returns the current line. content is the text without the break.
+// del includes the newline, or the preceding newline on the last line, so dd
+// removes one line and does not erase the rest of the buffer.
+func (e *Editor) lineAt(p int) (contentStart, contentEnd, delStart, delEnd int) {
+	n := len(e.text)
+	if p > n {
+		p = n
+	}
+	if p < 0 {
+		p = 0
+	}
+	contentStart = p
+	for contentStart > 0 && e.text[contentStart-1] != '\n' {
+		contentStart--
+	}
+	contentEnd = p
+	for contentEnd < n && e.text[contentEnd] != '\n' {
+		contentEnd++
+	}
+	delStart, delEnd = contentStart, contentEnd
+	if contentEnd < n && e.text[contentEnd] == '\n' {
+		delEnd = contentEnd + 1
+	} else if contentStart > 0 {
+		delStart = contentStart - 1
+	}
+	return contentStart, contentEnd, delStart, delEnd
+}
+
+// lineSpanDelta returns the line-wise content and delete span covering the
+// current line plus delta lines (+count for j, -count for k).
+func (e *Editor) lineSpanDelta(p, delta int) (contentStart, contentEnd, delStart, delEnd int) {
+	starts := []int{0}
+	for i, r := range e.text {
+		if r == '\n' {
+			starts = append(starts, i+1)
+		}
+	}
+	cur := 0
+	for i, s := range starts {
+		if s <= p {
+			cur = i
+		}
+	}
+	other := cur + delta
+	if other < 0 {
+		other = 0
+	}
+	if other >= len(starts) {
+		other = len(starts) - 1
+	}
+	first, last := cur, other
+	if first > last {
+		first, last = last, first
+	}
+	contentStart = starts[first]
+	contentEnd = len(e.text)
+	if last+1 < len(starts) {
+		contentEnd = starts[last+1] - 1
+	}
+	delStart, delEnd = contentStart, contentEnd
+	if contentEnd < len(e.text) && e.text[contentEnd] == '\n' {
+		delEnd = contentEnd + 1
+	} else if contentStart > 0 {
+		delStart = contentStart - 1
+	}
+	return contentStart, contentEnd, delStart, delEnd
 }
 
 // rangeFor maps an operator motion onto a half-open [start,end) span.
@@ -305,17 +391,46 @@ func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 		return 0, 0, false
 	}
 	switch m {
-	case 'b', 'B', '0', '^':
-		return target, e.cursor, true
+	case 'b', 'B', '0', '^', 'h', '{':
+		return target, start, true
+	case '}':
+		return start, target, true
 	case '$':
-		return e.cursor, len(e.text), true
+		_, end, _, _ := e.lineAt(e.cursor)
+		return e.cursor, end, true
+	case '%':
+		lo, hi := start, target
+		if hi < lo {
+			lo, hi = hi, lo
+		}
+		end := hi + 1
+		if end > len(e.text) {
+			end = len(e.text)
+		}
+		return lo, end, true
+	case 'F', 'T':
+		// Backward character search is exclusive of cursor position in Vim!
+		return target, start, true
+	case ';', ',':
+		effK := e.findKind
+		if m == ',' {
+			effK = reverseFindKind(effK)
+		}
+		if effK == 'F' || effK == 'T' {
+			return target, start, true
+		}
+		end := target + 1
+		if end > len(e.text) {
+			end = len(e.text)
+		}
+		return start, end, true
 	}
 	if target < start {
 		return target, start, true
 	}
-	// Forward motions are inclusive of the target character, except w and W
-	// which stop at the start of the next word.
-	if m == 'w' || m == 'W' {
+	// Forward motions are inclusive of the target character, except w, W, l, space
+	// which stop at the exclusive boundary.
+	if m == 'w' || m == 'W' || m == 'l' || m == ' ' {
 		return start, target, true
 	}
 	end := target + 1
@@ -367,6 +482,11 @@ func (e *Editor) deleteRange(a, b int) {
 func (e *Editor) beginChange(m rune, count int) {
 	e.inChange = true
 	e.changeM = m
+	e.changeObj = 0
+	e.changeAround = false
+	e.changeFindK = 0
+	e.changeFindCh = 0
+	e.changeRepeat = false
 	e.changeCount = count
 	e.changeFrom = e.cursor
 }
@@ -378,6 +498,11 @@ func (e *Editor) endChange() {
 	}
 	e.inChange = false
 	kind := e.changeM
+	obj := e.changeObj
+	around := e.changeAround
+	findK := e.changeFindK
+	findCh := e.changeFindCh
+	findRep := e.changeRepeat
 	count := e.changeCount
 	from, to := e.changeFrom, e.cursor
 	if from < 0 {
@@ -401,18 +526,68 @@ func (e *Editor) endChange() {
 	e.lastEdit = func(ed *Editor) {
 		switch kind {
 		case 'i', 'I':
+			if kind == 'I' {
+				ed.cursor, _ = ed.move('^', 1)
+			}
 			ed.insertRunes(ins)
-		case 'a', 'A':
+		case 'a':
 			if ed.cursor < len(ed.text) {
 				ed.cursor++
 			}
 			ed.insertRunes(ins)
-		case 'C', '$':
-			ed.deleteRange(ed.cursor, len(ed.text))
+		case 'A':
+			_, end, _, _ := ed.lineAt(ed.cursor)
+			ed.cursor = end
 			ed.insertRunes(ins)
-		case 'L':
-			ed.deleteRange(0, len(ed.text))
-			ed.cursor = 0
+		case 'C', '$':
+			_, end, _, _ := ed.lineAt(ed.cursor)
+			ed.deleteRange(ed.cursor, end)
+			ed.insertRunes(ins)
+		case 'L', 'S':
+			cs, ce, _, _ := ed.lineAt(ed.cursor)
+			ed.deleteRange(cs, ce)
+			ed.cursor = cs
+			ed.insertRunes(ins)
+		case 's':
+			end := ed.cursor + count
+			if end > len(ed.text) {
+				end = len(ed.text)
+			}
+			ed.deleteRange(ed.cursor, end)
+			ed.insertRunes(ins)
+		case 'O': // text object repeat
+			if s, en, ok := ed.textObjectSpan(around, obj, count); ok {
+				ed.deleteRange(s, en)
+				ed.insertRunes(ins)
+			}
+		case 'F': // find-char repeat ('cf', 'ct', 'cF', 'cT', 'c;', 'c,')
+			start := ed.cursor
+			target, ok := ed.findCharLine(findK, findCh, count, findRep)
+			if !ok {
+				return
+			}
+			var s, en int
+			if findK == 'F' || findK == 'T' {
+				s, en = target, start
+			} else {
+				s, en = start, target+1
+				if en > len(ed.text) {
+					en = len(ed.text)
+				}
+			}
+			ed.deleteRange(s, en)
+			ed.insertRunes(ins)
+		case 'g': // cge / cgE repeat
+			st := ed.cursor
+			q := st
+			for i := 0; i < count; i++ {
+				q = ed.wordEndBack(q, obj == 'E')
+			}
+			end := st + 1
+			if end > len(ed.text) {
+				end = len(ed.text)
+			}
+			ed.deleteRange(q, end)
 			ed.insertRunes(ins)
 		default:
 			if s, en, ok := ed.rangeFor(kind, count); ok {
@@ -423,16 +598,272 @@ func (e *Editor) endChange() {
 	}
 }
 
-func (e *Editor) operate(op, m rune, count int) {
-	if m == op {
+func (e *Editor) operateSpan(op rune, start, end int) {
+	if start > end {
+		start, end = end, start
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end > len(e.text) {
+		end = len(e.text)
+	}
+	switch op {
+	case 'y':
+		e.reg = append([]rune(nil), e.text[start:end]...)
+	case 'd':
+		e.deleteRange(start, end)
+	case 'c':
+		e.deleteRange(start, end)
+		e.mode = ModeInsert
+	}
+}
+
+func (e *Editor) operateFind(op, kind, ch rune, count int, isRepeat bool) {
+	start := e.cursor
+	target, ok := e.findCharLine(kind, ch, count, isRepeat)
+	if !ok {
+		return
+	}
+	var s, en int
+	if kind == 'F' || kind == 'T' {
+		s, en = target, start
+	} else {
+		s, en = start, target+1
+		if en > len(e.text) {
+			en = len(e.text)
+		}
+	}
+	switch op {
+	case 'y':
+		e.reg = append([]rune(nil), e.text[s:en]...)
+	case 'd':
+		e.deleteRange(s, en)
+		fk, fc, cc, fr := kind, ch, count, isRepeat
+		e.lastEdit = func(ed *Editor) {
+			ed.operateFind('d', fk, fc, cc, fr)
+		}
+	case 'c':
+		e.deleteRange(s, en)
+		e.beginChange('F', count)
+		e.changeFindK = kind
+		e.changeFindCh = ch
+		e.changeRepeat = isRepeat
+		e.mode = ModeInsert
+	}
+}
+
+func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
+	s, en, ok := e.textObjectSpan(around, obj, count)
+	if !ok {
+		return
+	}
+	switch op {
+	case 'y':
+		e.reg = append([]rune(nil), e.text[s:en]...)
+	case 'd':
+		e.deleteRange(s, en)
+		ar, ob, cc := around, obj, count
+		e.lastEdit = func(ed *Editor) {
+			if a, b, ok := ed.textObjectSpan(ar, ob, cc); ok {
+				ed.deleteRange(a, b)
+			}
+		}
+	case 'c':
+		e.deleteRange(s, en)
+		e.beginChange('O', count)
+		e.changeObj = obj
+		e.changeAround = around
+		e.mode = ModeInsert
+	}
+}
+
+func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
+	switch sub {
+	case 'g':
+		// dgg / cgg / ygg: linewise from line 1 (or line `count` if explicit) through current line.
+		lines := e.lineBounds()
+		curLine := e.lineIndexAt(lines, e.cursor)
+		targetLine := 0
+		if explicitCount && count-1 < len(lines) {
+			targetLine = count - 1
+		}
+		cs, ce, ds, de := e.lineSpanDelta(e.cursor, targetLine-curLine)
 		switch op {
 		case 'y':
-			e.reg = append([]rune(nil), e.text...)
+			e.reg = append([]rune(nil), e.text[ds:de]...)
 		case 'd':
-			e.deleteRange(0, len(e.text))
-			e.lastEdit = func(ed *Editor) { ed.deleteRange(0, len(ed.text)) }
+			e.deleteRange(ds, de)
+			tl, exp := targetLine, explicitCount
+			e.lastEdit = func(ed *Editor) {
+				ls := ed.lineBounds()
+				cl := ed.lineIndexAt(ls, ed.cursor)
+				tgt := 0
+				if exp && tl < len(ls) {
+					tgt = tl
+				}
+				_, _, a, b := ed.lineSpanDelta(ed.cursor, tgt-cl)
+				ed.deleteRange(a, b)
+			}
 		case 'c':
-			e.deleteRange(0, len(e.text))
+			e.deleteRange(cs, ce)
+			e.cursor = cs
+			e.beginChange('L', 1)
+			e.mode = ModeInsert
+		}
+	case 'e', 'E':
+		// dge / dgE: backward to end of previous word (inclusive of start char in Vim!).
+		start := e.cursor
+		p := start
+		for i := 0; i < count; i++ {
+			p = e.wordEndBack(p, sub == 'E')
+		}
+		lo, hi := p, start+1
+		if hi > len(e.text) {
+			hi = len(e.text)
+		}
+		if lo > hi {
+			lo = hi
+		}
+		e.operateSpan(op, lo, hi)
+		if op == 'd' {
+			big, cc := sub == 'E', count
+			e.lastEdit = func(ed *Editor) {
+				st := ed.cursor
+				q := st
+				for i := 0; i < cc; i++ {
+					q = ed.wordEndBack(q, big)
+				}
+				end := st + 1
+				if end > len(ed.text) {
+					end = len(ed.text)
+				}
+				ed.deleteRange(q, end)
+			}
+		} else if op == 'c' {
+			insStart := e.cursor
+			e.beginChange('g', count)
+			e.changeObj = sub
+			e.changeFrom = insStart
+		}
+	case '_':
+		// dg_ / cg_ / yg_: through last non-blank character on line (inclusive!).
+		start := e.cursor
+		target := e.lastNonBlankOnLine(start, count)
+		lo, hi := start, target+1
+		if target < start {
+			lo, hi = target, start
+		}
+		if hi > len(e.text) {
+			hi = len(e.text)
+		}
+		e.operateSpan(op, lo, hi)
+		if op == 'd' {
+			cc := count
+			e.lastEdit = func(ed *Editor) {
+				st := ed.cursor
+				tgt := ed.lastNonBlankOnLine(st, cc)
+				a, b := st, tgt+1
+				if tgt < st {
+					a, b = tgt, st
+				}
+				if b > len(ed.text) {
+					b = len(ed.text)
+				}
+				ed.deleteRange(a, b)
+			}
+		} else if op == 'c' {
+			e.beginChange('$', 1)
+		}
+	}
+}
+
+func (e *Editor) operate(op, m rune, count int) {
+	if m == op {
+		delta := count - 1
+		if delta < 0 {
+			delta = 0
+		}
+		cs, ce, ds, de := e.lineSpanDelta(e.cursor, delta)
+		switch op {
+		case 'y':
+			e.reg = append([]rune(nil), e.text[ds:de]...)
+		case 'd':
+			e.deleteRange(ds, de)
+			d := delta
+			e.lastEdit = func(ed *Editor) {
+				_, _, a, b := ed.lineSpanDelta(ed.cursor, d)
+				ed.deleteRange(a, b)
+			}
+		case 'c':
+			e.deleteRange(cs, ce)
+			e.cursor = cs
+			e.beginChange('L', 1)
+			e.mode = ModeInsert
+		}
+		return
+	}
+	if m == 'G' {
+		lines := e.lineBounds()
+		curLine := e.lineIndexAt(lines, e.cursor)
+		targetLine := len(lines) - 1
+		cs, ce, ds, de := e.lineSpanDelta(e.cursor, targetLine-curLine)
+		switch op {
+		case 'y':
+			e.reg = append([]rune(nil), e.text[ds:de]...)
+		case 'd':
+			e.deleteRange(ds, de)
+			e.lastEdit = func(ed *Editor) {
+				ls := ed.lineBounds()
+				cl := ed.lineIndexAt(ls, ed.cursor)
+				_, _, a, b := ed.lineSpanDelta(ed.cursor, (len(ls)-1)-cl)
+				ed.deleteRange(a, b)
+			}
+		case 'c':
+			e.deleteRange(cs, ce)
+			e.cursor = cs
+			e.beginChange('L', 1)
+			e.mode = ModeInsert
+		}
+		return
+	}
+	if m == ';' || m == ',' {
+		if e.findCh == 0 {
+			return
+		}
+		k := e.findKind
+		if k == 0 {
+			if e.findDir < 0 {
+				k = 'F'
+			} else {
+				k = 'f'
+			}
+		}
+		if m == ',' {
+			k = reverseFindKind(k)
+		}
+		e.operateFind(op, k, e.findCh, count, true)
+		return
+	}
+	if m == 'j' || m == 'k' {
+		delta := count
+		if m == 'k' {
+			delta = -count
+		}
+		cs, ce, ds, de := e.lineSpanDelta(e.cursor, delta)
+		switch op {
+		case 'y':
+			e.reg = append([]rune(nil), e.text[ds:de]...)
+		case 'd':
+			e.deleteRange(ds, de)
+			d := delta
+			e.lastEdit = func(ed *Editor) {
+				_, _, a, b := ed.lineSpanDelta(ed.cursor, d)
+				ed.deleteRange(a, b)
+			}
+		case 'c':
+			e.deleteRange(cs, ce)
+			e.cursor = cs
 			e.beginChange('L', 1)
 			e.mode = ModeInsert
 		}
@@ -556,20 +987,36 @@ func (e *Editor) redoEdit() {
 // ---------------------------------------------------------------------------
 
 func (e *Editor) printable(key string) (rune, bool) {
-	if len(key) != 1 {
+	if key == "" || utf8.RuneCountInString(key) != 1 {
 		return 0, false
 	}
-	r := rune(key[0])
-	if r < 0x20 || r >= 0x7f {
+	r, _ := utf8.DecodeRuneInString(key)
+	if r < 0x20 || r == 0x7f || unicode.IsControl(r) {
 		return 0, false
 	}
 	return r, true
 }
 
+func (e *Editor) clearPendingState() {
+	e.pending = 0
+	e.pendingOp = 0
+	e.opCount = 0
+	e.count = 0
+}
+
+func (e *Editor) totalOpCount() int {
+	oc := e.opCount
+	if oc <= 0 {
+		oc = 1
+	}
+	e.opCount = 0
+	return oc * e.takeCount()
+}
+
 func (e *Editor) Feed(key string) Action {
-	// A pending r, f, F, t or T is waiting for one literal character.
+	// A pending r, f, F, t or T is waiting for one literal character (never treat digits as counts here!).
 	if e.pending == 'r' {
-		e.pending = 0
+		e.clearPendingState()
 		if r, ok := e.printable(key); ok {
 			e.replaceChar(r)
 			rr := r
@@ -579,44 +1026,63 @@ func (e *Editor) Feed(key string) Action {
 	}
 	if e.pending == 'f' || e.pending == 'F' || e.pending == 't' || e.pending == 'T' {
 		m := e.pending
+		op := e.pendingOp
+		cnt := e.totalOpCount()
 		e.pending = 0
+		e.pendingOp = 0
+		if key == "esc" {
+			return ActStay
+		}
 		if r, ok := e.printable(key); ok {
 			e.findCh = r
+			e.findKind = m
 			if m == 'f' || m == 't' {
 				e.findDir = 1
 			} else {
 				e.findDir = -1
 			}
-			if p, ok := e.move(m, e.takeCount()); ok {
+			if op != 0 {
+				e.operateFind(op, m, r, cnt, false)
+			} else if p, ok := e.findCharLine(m, r, cnt, false); ok {
 				e.cursor = p
 			}
 		}
 		return ActStay
 	}
 
-	// An operator is waiting for its motion.
-	if e.pending == 'd' || e.pending == 'c' || e.pending == 'y' {
-		op := e.pending
+	// Text-object selector ('i' or 'a' under an operator).
+	if (e.pending == 'i' || e.pending == 'a') && e.pendingOp != 0 {
+		around := e.pending == 'a'
+		op := e.pendingOp
+		cnt := e.totalOpCount()
 		e.pending = 0
+		e.pendingOp = 0
 		if key == "esc" {
 			return ActStay
 		}
-		if key == string(op) {
-			e.operate(op, op, 1)
-			return ActStay
-		}
-		if m, ok := e.printable(key); ok {
-			if m == 'f' || m == 'F' || m == 't' || m == 'T' {
-				e.pending = m
-				e.pendingOp = op
-				return ActStay
-			}
-			e.operate(op, m, e.takeCount())
+		if obj, ok := e.printable(key); ok {
+			e.operateTextObject(op, around, obj, cnt)
 		}
 		return ActStay
 	}
 
-	// Numeric prefix. 0 is a motion unless a count is already running.
+	// 'g' sub-motion under an operator (dgg, dge, dgE, dg_).
+	if e.pending == 'g' && e.pendingOp != 0 {
+		op := e.pendingOp
+		explicit := e.opCount > 0 || e.count > 0
+		cnt := e.totalOpCount()
+		e.pending = 0
+		e.pendingOp = 0
+		if key == "esc" {
+			return ActStay
+		}
+		if sub, ok := e.printable(key); ok {
+			e.operateG(op, sub, cnt, explicit)
+		}
+		return ActStay
+	}
+
+	// Numeric prefix (allowed both before an operator and between operator and motion, e.g. d2w / d2fx!).
 	if e.mode == ModeNormal {
 		if r, ok := e.printable(key); ok {
 			if (r >= '1' && r <= '9') || (r == '0' && e.count > 0) {
@@ -624,6 +1090,65 @@ func (e *Editor) Feed(key string) Action {
 				return ActStay
 			}
 		}
+	}
+
+	// An operator is waiting for its motion or text-object prefix.
+	if e.pending == 'd' || e.pending == 'c' || e.pending == 'y' {
+		op := e.pending
+		if key == "esc" {
+			e.clearPendingState()
+			return ActStay
+		}
+		if key == string(op) {
+			cnt := e.totalOpCount()
+			e.pending = 0
+			e.pendingOp = 0
+			e.operate(op, op, cnt)
+			return ActStay
+		}
+		if key == "left" || key == "bs" {
+			cnt := e.totalOpCount()
+			e.pending = 0
+			e.pendingOp = 0
+			e.operate(op, 'h', cnt)
+			return ActStay
+		}
+		if key == "right" {
+			cnt := e.totalOpCount()
+			e.pending = 0
+			e.pendingOp = 0
+			e.operate(op, 'l', cnt)
+			return ActStay
+		}
+		if m, ok := e.printable(key); ok {
+			if m == 'f' || m == 'F' || m == 't' || m == 'T' || m == 'i' || m == 'a' || m == 'g' {
+				// Preserve accumulated count across prefix (e.g. d2fx or d2iw).
+				if e.count > 0 {
+					if e.opCount <= 0 {
+						e.opCount = 1
+					}
+					e.opCount *= e.count
+					e.count = 0
+				}
+				e.pending = m
+				e.pendingOp = op
+				return ActStay
+			}
+			if m == 'G' && (e.opCount > 0 || e.count > 0) {
+				explicitLine := e.totalOpCount()
+				e.pending = 0
+				e.pendingOp = 0
+				e.operateG(op, 'g', explicitLine, true)
+				return ActStay
+			}
+			cnt := e.totalOpCount()
+			e.pending = 0
+			e.pendingOp = 0
+			e.operate(op, m, cnt)
+			return ActStay
+		}
+		e.clearPendingState()
+		return ActStay
 	}
 
 	switch e.mode {
@@ -727,11 +1252,17 @@ func (e *Editor) feedNormal(key string) Action {
 			p, _ := e.move('l', e.takeCount())
 			e.cursor = p
 			return ActStay
-		case 'w', 'W', 'b', 'B', 'e', 'E', '0', '^', '$':
+		case 'w', 'W', 'b', 'B', 'e', 'E', '0', '^', '_', '$', ' ':
 			p, _ := e.move(r, e.takeCount())
 			e.cursor = p
 			return ActStay
+		case '%', '{', '}':
+			if p, ok := e.move(r, e.takeCount()); ok {
+				e.cursor = p
+			}
+			return ActStay
 		case 'f', 'F', 't', 'T':
+			e.opCount = 0
 			e.pending = r
 			return ActStay
 		case ';', ',':
@@ -740,25 +1271,44 @@ func (e *Editor) feedNormal(key string) Action {
 			}
 			return ActStay
 		case 'i':
+			e.count = 0
 			e.mode = ModeInsert
 			e.beginChange('i', 1)
 			return ActStay
 		case 'I':
+			e.count = 0
 			e.mode = ModeInsert
 			e.cursor, _ = e.move('^', 1)
 			e.beginChange('I', 1)
 			return ActStay
 		case 'a':
+			e.count = 0
 			e.mode = ModeInsert
-			if e.cursor < len(e.text) {
+			if e.cursor < len(e.text) && e.text[e.cursor] != '\n' {
 				e.cursor++
 			}
 			e.beginChange('a', 1)
 			return ActStay
 		case 'A':
+			e.count = 0
 			e.mode = ModeInsert
-			e.cursor = len(e.text)
+			_, end, _, _ := e.lineAt(e.cursor)
+			e.cursor = end
 			e.beginChange('A', 1)
+			return ActStay
+		case 'S':
+			e.count = 0
+			cs, ce, _, _ := e.lineAt(e.cursor)
+			e.deleteRange(cs, ce)
+			e.cursor = cs
+			e.beginChange('S', 1)
+			e.mode = ModeInsert
+			return ActStay
+		case 'J':
+			cnt := e.takeCount()
+			e.joinLines(cnt)
+			cc := cnt
+			e.lastEdit = func(ed *Editor) { ed.joinLines(cc) }
 			return ActStay
 		case 'R':
 			e.mode = ModeReplace
@@ -799,14 +1349,23 @@ func (e *Editor) feedNormal(key string) Action {
 			e.mode = ModeInsert
 			return ActStay
 		case 'd', 'c', 'y':
+			e.opCount = 0
+			if e.count > 0 {
+				e.opCount = e.takeCount()
+			}
 			e.pending = r
 			return ActStay
 		case 'D':
-			e.deleteRange(e.cursor, len(e.text))
-			e.lastEdit = func(ed *Editor) { ed.deleteRange(ed.cursor, len(ed.text)) }
+			_, end, _, _ := e.lineAt(e.cursor)
+			e.deleteRange(e.cursor, end)
+			e.lastEdit = func(ed *Editor) {
+				_, lineEnd, _, _ := ed.lineAt(ed.cursor)
+				ed.deleteRange(ed.cursor, lineEnd)
+			}
 			return ActStay
 		case 'C':
-			e.deleteRange(e.cursor, len(e.text))
+			_, end, _, _ := e.lineAt(e.cursor)
+			e.deleteRange(e.cursor, end)
 			e.beginChange('C', 1)
 			e.mode = ModeInsert
 			return ActStay
@@ -848,13 +1407,15 @@ func (e *Editor) feedNormal(key string) Action {
 
 	switch key {
 	case "esc":
-		if e.pending != 0 {
-			e.pending = 0
-			e.pendingOp = 0
-			e.count = 0
+		if e.pending != 0 || e.pendingOp != 0 || e.count > 0 || e.opCount > 0 {
+			e.clearPendingState()
 			return ActStay
 		}
 		return ActOut
+	case "bs":
+		p, _ := e.move('h', e.takeCount())
+		e.cursor = p
+		return ActStay
 	case "enter":
 		return ActAccept
 	case "ctrl-c":
@@ -900,13 +1461,25 @@ type View struct {
 
 // View returns the renderable snapshot of the Editor.
 func (e *Editor) View(label string, focused bool) View {
+	pend := e.pending
+	if e.pendingOp != 0 {
+		pend = e.pendingOp
+	}
+	cnt := e.count
+	if e.opCount > 0 {
+		if cnt > 0 {
+			cnt = e.opCount * cnt
+		} else {
+			cnt = e.opCount
+		}
+	}
 	return View{
 		Label:   label,
 		Text:    e.Text(),
 		Cursor:  e.cursor,
 		Mode:    e.mode,
-		Pending: e.pending,
-		Count:   e.count,
+		Pending: pend,
+		Count:   cnt,
 		Focused: focused,
 	}
 }
