@@ -28,6 +28,9 @@ type oracleResult struct {
 
 func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 	if _, err := exec.LookPath("nvim"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("nvim is required in CI so the live differential gates the suite")
+		}
 		t.Skip("nvim is not installed; deterministic oracle regressions still run")
 	}
 	cases := []oracleCase{
