@@ -227,6 +227,111 @@ func TestV031OracleRegressions(t *testing.T) {
 			keys: "2das.", wantText: "", wantPos: 0,
 		},
 		{
+			name: "rparen stops at blank line",
+			text: "One two.\n\nThree.", cursor: 0,
+			keys: ")", wantText: "One two.\n\nThree.", wantPos: 9,
+		},
+		{
+			name: "d rparen deletes to blank line",
+			text: "One two.\n\nThree.", cursor: 0,
+			keys: "d)", wantText: "\nThree.", wantPos: 0,
+		},
+		{
+			name: "counted rparen stops at second blank",
+			text: "One two.\n\nThree. Four.", cursor: 0,
+			keys: "2)", wantText: "One two.\n\nThree. Four.", wantPos: 10,
+		},
+		{
+			name: "rparen ordinary",
+			text: "One two. Three four.", cursor: 0,
+			keys: ")", wantText: "One two. Three four.", wantPos: 9,
+		},
+		{
+			name: "lparen ordinary",
+			text: "One two. Three four.", cursor: 12,
+			keys: "(", wantText: "One two. Three four.", wantPos: 9,
+		},
+		{
+			name: "counted lparen",
+			text: "One two. Three four. Five.", cursor: 12,
+			keys: "2(", wantText: "One two. Three four. Five.", wantPos: 0,
+		},
+		{
+			name: "lparen stops at blank line",
+			text: "One two.\n\nThree.", cursor: 10,
+			keys: "(", wantText: "One two.\n\nThree.", wantPos: 9,
+		},
+		{
+			name: "counted lparen across blank",
+			text: "One two.\n\nThree.", cursor: 10,
+			keys: "2(", wantText: "One two.\n\nThree.", wantPos: 0,
+		},
+		{
+			name: "d rparen ordinary",
+			text: "One two. Three four.", cursor: 0,
+			keys: "d)", wantText: "Three four.", wantPos: 0,
+		},
+		{
+			name: "counted d rparen deletes sentences",
+			text: "One two. Three four. Five six.", cursor: 0,
+			keys: "d2)", wantText: "Five six.", wantPos: 0,
+		},
+		{
+			name: "dot repeat of d rparen",
+			text: "One two. Three four. Five six.", cursor: 0,
+			keys: "d).", wantText: "Five six.", wantPos: 0,
+		},
+		{
+			name: "rparen at last sentence clamps",
+			text: "One two.", cursor: 0,
+			keys: ")", wantText: "One two.", wantPos: 7,
+		},
+		{
+			name: "overshot rparen clamps to end",
+			text: "One two. Three", cursor: 0,
+			keys: "2)", wantText: "One two. Three", wantPos: 13,
+		},
+		{
+			name: "overshot rparen aborts",
+			text: "One two. Three", cursor: 0,
+			keys: "3)", wantText: "One two. Three", wantPos: 0,
+		},
+		{
+			name: "overshot lparen aborts",
+			text: "One two. Three. Four.", cursor: 17,
+			keys: "4(", wantText: "One two. Three. Four.", wantPos: 17,
+		},
+		{
+			name: "d rparen at eol deletes to end",
+			text: "One two. ", cursor: 0,
+			keys: "d)", wantText: "", wantPos: 0,
+		},
+		{
+			name: "cas on trailing whitespace inserts",
+			text: "One two.   ", cursor: 9,
+			keys: "casQ<esc>", wantText: "One two.Q   ", wantPos: 8,
+		},
+		{
+			name: "cas on empty buffer inserts",
+			text: "", cursor: 0,
+			keys: "casQ<esc>", wantText: "Q", wantPos: 0,
+		},
+		{
+			name: "cis on empty buffer inserts",
+			text: "", cursor: 0,
+			keys: "cisQ<esc>", wantText: "Q", wantPos: 0,
+		},
+		{
+			name: "cas dot repeat on trailing whitespace",
+			text: "One two.   ", cursor: 9,
+			keys: "casQ<esc>.", wantText: "Q", wantPos: 0,
+		},
+		{
+			name: "cas space dot repeat inserts again",
+			text: "One two.   ", cursor: 9,
+			keys: "cas <esc>.", wantText: "One two.     ", wantPos: 8,
+		},
+		{
 			name: "dot repeats bracket change",
 			text: "(a)b(c", cursor: 5,
 			keys: "c[(Q<esc>.", wantText: "(a)bQc", wantPos: 4,
@@ -342,6 +447,11 @@ func TestOracleRegisterContents(t *testing.T) {
 		{name: "das end whitespace register untouched", text: "One two.   ", cursor: 9, keys: "das", wantText: "One two.   ", wantReg: ""},
 		{name: "das blank line register", text: "One two.\n\nThree.", cursor: 2, keys: "das", wantText: "\nThree.", wantReg: "One two.\n"},
 		{name: "cas dot repeat register", text: "One two. Three four. Five six.", cursor: 12, keys: "casQ<esc>.", wantText: "One two.Q", wantReg: " QFive six."},
+		{name: "d rparen blank line register", text: "One two.\n\nThree.", cursor: 0, keys: "d)", wantText: "\nThree.", wantReg: "One two.\n"},
+		{name: "y rparen blank line register", text: "One two.\n\nThree.", cursor: 0, keys: "y)", wantText: "One two.\n\nThree.", wantReg: "One two.\n"},
+		{name: "d rparen ordinary register", text: "One two. Three four.", cursor: 0, keys: "d)", wantText: "Three four.", wantReg: "One two. "},
+		{name: "dot repeat d rparen register", text: "One two. Three four. Five six.", cursor: 0, keys: "d).", wantText: "Five six.", wantReg: "Three four. "},
+		{name: "cas dot repeat empty register", text: "One two.   ", cursor: 9, keys: "casQ<esc>.", wantText: "Q", wantReg: "One two.Q   "},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

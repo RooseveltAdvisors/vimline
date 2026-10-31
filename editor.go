@@ -979,9 +979,6 @@ func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 	case 'b', 'B', '0', '^', 'h', '{', '(':
 		return target, start, true
 	case ')':
-		if target == len(e.text)-1 {
-			return start, len(e.text), true
-		}
 		return start, target, true
 	case '}':
 		ls, le, _, _ := e.lineAt(start)
@@ -1324,6 +1321,9 @@ func (e *Editor) endChange() {
 					ed.regLinewise = true
 				}
 				ed.insertRunes(ins)
+			} else if obj == 's' {
+				ed.cursor = s
+				ed.insertRunes(ins)
 			}
 		case 'w', 'W':
 			start := ed.cursor
@@ -1548,6 +1548,15 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 		if obj == 'p' && len(e.text) == 0 {
 			e.reg = []rune{'\n'}
 			e.regLinewise = true
+		}
+		if op == 'c' && obj == 's' {
+			e.pushUndo()
+			e.cursor = s
+			e.beginChange('O', count)
+			e.changeObj = obj
+			e.changeAround = around
+			e.mode = ModeInsert
+			return
 		}
 		if op == 'c' && len(e.text) == 0 && (obj == 'w' || obj == 'W' || obj == 'p') {
 			if obj == 'p' {

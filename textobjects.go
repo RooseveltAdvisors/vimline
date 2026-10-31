@@ -364,74 +364,11 @@ func (e *Editor) textObjectSpan(around bool, obj rune, count int) (int, int, boo
 
 func sentenceEndRune(r rune) bool { return r == '.' || r == '!' || r == '?' }
 
-type sentencePart struct {
-	start, end int
-	space      bool
-}
-
-func (e *Editor) sentenceParts() []sentencePart {
-	var parts []sentencePart
-	for i := 0; i < len(e.text); {
-		if unicode.IsSpace(e.text[i]) {
-			start := i
-			for i < len(e.text) && unicode.IsSpace(e.text[i]) {
-				i++
-			}
-			parts = append(parts, sentencePart{start: start, end: i, space: true})
-			continue
-		}
-		start := i
-		for i < len(e.text) {
-			i++
-			if !sentenceEndRune(e.text[i-1]) {
-				continue
-			}
-			j := i
-			for j < len(e.text) && strings.ContainsRune(")]}'\"", e.text[j]) {
-				j++
-			}
-			if j == len(e.text) || unicode.IsSpace(e.text[j]) {
-				i = j
-				break
-			}
-		}
-		parts = append(parts, sentencePart{start: start, end: i})
-	}
-	return parts
-}
-
 func (e *Editor) sentenceMove(p int, forward bool, count int) (int, bool) {
-	parts := e.sentenceParts()
 	if count < 1 {
 		count = 1
 	}
-	target := p
-	for range count {
-		found := false
-		if forward {
-			for _, part := range parts {
-				if !part.space && part.start > target {
-					target, found = part.start, true
-					break
-				}
-			}
-		} else {
-			for i := len(parts) - 1; i >= 0; i-- {
-				if !parts[i].space && parts[i].start < target {
-					target, found = parts[i].start, true
-					break
-				}
-			}
-		}
-		if !found {
-			if forward && len(e.text) > 0 && target != len(e.text)-1 {
-				target = len(e.text) - 1
-				continue
-			}
-			return p, false
-		}
-	}
-	return target, true
+	return e.sentenceFind(p, forward, count)
 }
 
 func sentenceBlank(r rune) bool { return r == ' ' || r == '\t' }
@@ -454,7 +391,13 @@ func sentenceIncl(text []rune, p int) (int, bool) {
 	if p >= len(text) {
 		return p, false
 	}
-	if text[p] != '\n' && p+1 < len(text) && text[p+1] == '\n' {
+	if text[p] == '\n' {
+		return p + 1, true
+	}
+	if p+1 == len(text) {
+		return p + 1, false
+	}
+	if text[p+1] == '\n' {
 		return p + 2, true
 	}
 	return p + 1, true
@@ -473,10 +416,10 @@ func sentenceDecl(text []rune, p int) (int, bool) {
 func (e *Editor) sentenceSkipBlanks(p int) int {
 	for sentenceBlank(sentenceChar(e.text, p)) {
 		np, ok := sentenceIncl(e.text, p)
+		p = np
 		if !ok {
 			return p
 		}
-		p = np
 	}
 	return p
 }
@@ -488,16 +431,14 @@ func (e *Editor) sentenceFirstBlank(p int) int {
 			return p
 		}
 		if !sentenceBlank(sentenceChar(e.text, np)) {
-			if ip, ok := sentenceIncl(e.text, np); ok {
-				return ip
-			}
-			return np
+			ip, _ := sentenceIncl(e.text, np)
+			return ip
 		}
 		p = np
 	}
 }
 
-func (e *Editor) sentenceFindOnce(pos int, forward bool) (int, bool) {
+func (e *Editor) sentenceFindOnce(pos int, forward bool, count int) (int, bool) {
 	text := e.text
 	step := sentenceIncl
 	if !forward {
@@ -506,10 +447,10 @@ func (e *Editor) sentenceFindOnce(pos int, forward bool) (int, bool) {
 	if sentenceChar(text, pos) == 0 {
 		for {
 			np, ok := step(text, pos)
+			pos = np
 			if !ok {
 				break
 			}
-			pos = np
 			if sentenceChar(text, pos) != 0 {
 				break
 			}
@@ -582,11 +523,14 @@ func (e *Editor) sentenceFindOnce(pos int, forward bool) (int, bool) {
 			}
 		}
 		np, ok := step(text, pos)
+		pos = np
 		if !ok {
+			if count > 0 {
+				return pos, false
+			}
 			noskip = true
 			break
 		}
-		pos = np
 	}
 	if !noskip {
 		pos = e.sentenceSkipBlanks(pos)
@@ -594,28 +538,28 @@ func (e *Editor) sentenceFindOnce(pos int, forward bool) (int, bool) {
 	return pos, true
 }
 
-func (e *Editor) sentenceFind(p int, forward bool) (int, bool) {
+func (e *Editor) sentenceFind(p int, forward bool, count int) (int, bool) {
 	step := sentenceIncl
 	if !forward {
 		step = sentenceDecl
 	}
 	pos := p
-	for remaining := 1; remaining > 0; remaining-- {
+	for remaining := count; remaining > 0; remaining-- {
 		prev := pos
-		np, ok := e.sentenceFindOnce(pos, forward)
+		np, ok := e.sentenceFindOnce(pos, forward, remaining-1)
 		if !ok {
-			return pos, false
+			return p, false
 		}
 		pos = np
 		if pos == prev {
 			np, ok := step(e.text, pos)
+			pos = np
 			if !ok {
 				if remaining > 1 {
-					return pos, false
+					return p, false
 				}
 				break
 			}
-			pos = np
 			remaining++
 		}
 	}
@@ -633,14 +577,14 @@ func (e *Editor) textObjectSentence(around bool, count int) (int, int, bool) {
 	if p >= len(e.text) {
 		p = len(e.text) - 1
 	}
-	ns, _ := e.sentenceFind(p, true)
+	ns, _ := e.sentenceFind(p, true, 1)
 	startBlank := e.sentenceSkipBlanks(p) == ns
 	var start, cursor int
 	if startBlank {
 		start = e.sentenceFirstBlank(p)
 		cursor = ns
 	} else {
-		cursor, _ = e.sentenceFind(ns, false)
+		cursor, _ = e.sentenceFind(ns, false, 1)
 		start = cursor
 	}
 	ncount := count * 2
@@ -653,7 +597,7 @@ func (e *Editor) textObjectSentence(around bool, count int) (int, int, bool) {
 	if ncount > 0 {
 		atStart := true
 		for i := 0; i < ncount; i++ {
-			cursor, _ = e.sentenceFind(cursor, true)
+			cursor, _ = e.sentenceFind(cursor, true, 1)
 			if atStart {
 				cursor = e.sentenceFirstBlank(cursor)
 			}
