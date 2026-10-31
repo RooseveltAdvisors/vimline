@@ -434,39 +434,253 @@ func (e *Editor) sentenceMove(p int, forward bool, count int) (int, bool) {
 	return target, true
 }
 
+func sentenceBlank(r rune) bool { return r == ' ' || r == '\t' }
+
+func sentenceChar(text []rune, p int) rune {
+	if p < 0 || p >= len(text) || text[p] == '\n' {
+		return 0
+	}
+	return text[p]
+}
+
+func sentenceInc(text []rune, p int) (int, bool) {
+	if p >= len(text) {
+		return p, false
+	}
+	return p + 1, true
+}
+
+func sentenceIncl(text []rune, p int) (int, bool) {
+	if p >= len(text) {
+		return p, false
+	}
+	if text[p] != '\n' && p+1 < len(text) && text[p+1] == '\n' {
+		return p + 2, true
+	}
+	return p + 1, true
+}
+
+func sentenceDecl(text []rune, p int) (int, bool) {
+	if p <= 0 {
+		return p, false
+	}
+	if p >= 2 && text[p-1] == '\n' && text[p-2] != '\n' {
+		return p - 2, true
+	}
+	return p - 1, true
+}
+
+func (e *Editor) sentenceSkipBlanks(p int) int {
+	for sentenceBlank(sentenceChar(e.text, p)) {
+		np, ok := sentenceIncl(e.text, p)
+		if !ok {
+			return p
+		}
+		p = np
+	}
+	return p
+}
+
+func (e *Editor) sentenceFirstBlank(p int) int {
+	for {
+		np, ok := sentenceDecl(e.text, p)
+		if !ok {
+			return p
+		}
+		if !sentenceBlank(sentenceChar(e.text, np)) {
+			if ip, ok := sentenceIncl(e.text, np); ok {
+				return ip
+			}
+			return np
+		}
+		p = np
+	}
+}
+
+func (e *Editor) sentenceFindOnce(pos int, forward bool) (int, bool) {
+	text := e.text
+	step := sentenceIncl
+	if !forward {
+		step = sentenceDecl
+	}
+	if sentenceChar(text, pos) == 0 {
+		for {
+			np, ok := step(text, pos)
+			if !ok {
+				break
+			}
+			pos = np
+			if sentenceChar(text, pos) != 0 {
+				break
+			}
+		}
+		if forward {
+			return e.sentenceSkipBlanks(pos), true
+		}
+	} else if !forward {
+		if np, ok := sentenceDecl(text, pos); ok {
+			pos = np
+		}
+	}
+	foundDot := false
+	for {
+		c := sentenceChar(text, pos)
+		if !sentenceBlank(c) && !strings.ContainsRune(".!?)]\"'", c) {
+			break
+		}
+		tpos, ok := sentenceDecl(text, pos)
+		if !ok || (forward && sentenceChar(text, tpos) == 0) {
+			break
+		}
+		if foundDot {
+			break
+		}
+		if sentenceEndRune(c) {
+			foundDot = true
+		}
+		if strings.ContainsRune(")]\"'", c) && !strings.ContainsRune(".!?)]\"'", sentenceChar(text, tpos)) {
+			break
+		}
+		pos = tpos
+	}
+	sentLine, _, _, _ := e.lineAt(pos)
+	noskip := false
+	for {
+		c := sentenceChar(text, pos)
+		if c == 0 {
+			if !forward {
+				if ls, le, _, _ := e.lineAt(pos); ls != sentLine && le+1 < len(e.text) {
+					pos = le + 1
+				}
+			}
+			break
+		}
+		if sentenceEndRune(c) {
+			tpos := pos
+			cc := c
+			failed := false
+			for {
+				np, ok := sentenceInc(text, tpos)
+				if !ok {
+					failed = true
+					break
+				}
+				tpos = np
+				cc = sentenceChar(text, tpos)
+				if !strings.ContainsRune(")]\"'", cc) {
+					break
+				}
+			}
+			if failed || cc == 0 || sentenceBlank(cc) {
+				pos = tpos
+				if sentenceChar(text, pos) == 0 {
+					if np, ok := sentenceInc(text, pos); ok {
+						pos = np
+					}
+				}
+				break
+			}
+		}
+		np, ok := step(text, pos)
+		if !ok {
+			noskip = true
+			break
+		}
+		pos = np
+	}
+	if !noskip {
+		pos = e.sentenceSkipBlanks(pos)
+	}
+	return pos, true
+}
+
+func (e *Editor) sentenceFind(p int, forward bool) (int, bool) {
+	step := sentenceIncl
+	if !forward {
+		step = sentenceDecl
+	}
+	pos := p
+	for remaining := 1; remaining > 0; remaining-- {
+		prev := pos
+		np, ok := e.sentenceFindOnce(pos, forward)
+		if !ok {
+			return pos, false
+		}
+		pos = np
+		if pos == prev {
+			np, ok := step(e.text, pos)
+			if !ok {
+				if remaining > 1 {
+					return pos, false
+				}
+				break
+			}
+			pos = np
+			remaining++
+		}
+	}
+	return pos, true
+}
+
 func (e *Editor) textObjectSentence(around bool, count int) (int, int, bool) {
-	parts := e.sentenceParts()
-	if len(parts) == 0 {
+	if count < 1 {
+		count = 1
+	}
+	if len(e.text) == 0 {
 		return 0, 0, false
 	}
 	p := e.cursor
 	if p >= len(e.text) {
 		p = len(e.text) - 1
 	}
-	idx := -1
-	for i, part := range parts {
-		if p >= part.start && p < part.end {
-			idx = i
-			break
+	ns, _ := e.sentenceFind(p, true)
+	startBlank := e.sentenceSkipBlanks(p) == ns
+	var start, cursor int
+	if startBlank {
+		start = e.sentenceFirstBlank(p)
+		cursor = ns
+	} else {
+		cursor, _ = e.sentenceFind(ns, false)
+		start = cursor
+	}
+	ncount := count * 2
+	if !around {
+		ncount = count
+		if startBlank {
+			ncount--
 		}
 	}
-	if idx < 0 {
-		return 0, 0, false
+	if ncount > 0 {
+		atStart := true
+		for i := 0; i < ncount; i++ {
+			cursor, _ = e.sentenceFind(cursor, true)
+			if atStart {
+				cursor = e.sentenceFirstBlank(cursor)
+			}
+			if i == ncount-1 || atStart {
+				cursor, _ = sentenceDecl(e.text, cursor)
+			}
+			atStart = !atStart
+		}
+	} else {
+		cursor, _ = sentenceDecl(e.text, cursor)
 	}
-	start, end := parts[idx].start, parts[idx].end
-	if around && !parts[idx].space {
-		if idx+1 < len(parts) && parts[idx+1].space {
-			end = parts[idx+1].end
-		} else if idx > 0 && parts[idx-1].space {
-			start = parts[idx-1].start
+	if around {
+		if startBlank {
+			cursor = e.sentenceFirstBlank(cursor)
+			if sentenceBlank(sentenceChar(e.text, cursor)) {
+				cursor, _ = sentenceDecl(e.text, cursor)
+			}
+		} else if !sentenceBlank(sentenceChar(e.text, cursor)) {
+			start = e.sentenceFirstBlank(start)
 		}
 	}
-	for step := 1; step < count; step++ {
-		next := idx + step
-		if next >= len(parts) {
-			break
-		}
-		end = parts[next].end
+	end := cursor + 1
+	if ne, ok := sentenceIncl(e.text, cursor); ok && ne > end {
+		end = ne
+	}
+	if end > len(e.text) {
+		end = len(e.text)
 	}
 	return start, end, end > start
 }

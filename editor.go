@@ -1563,6 +1563,9 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 		} else if (obj == 'w' || obj == 'W') && count > 1 && len(e.text) > 0 {
 			e.cursor = len(e.text) - 1
 			e.normalCursorClamp()
+		} else if obj == 's' {
+			e.cursor = en
+			e.normalCursorClamp()
 		}
 		return
 	}

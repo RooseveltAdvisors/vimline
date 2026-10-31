@@ -147,6 +147,86 @@ func TestV031OracleRegressions(t *testing.T) {
 			keys: "ma-lde0i0123456789<esc>`a", wantText: "0123456789a\ncd", wantPos: 10,
 		},
 		{
+			name: "das on whitespace selects following sentence",
+			text: "One two. Three four. Five six.", cursor: 8,
+			keys: "das", wantText: "One two. Five six.", wantPos: 8,
+		},
+		{
+			name: "das on leading whitespace selects sentence",
+			text: " One two. Three four.", cursor: 0,
+			keys: "das", wantText: "Three four.", wantPos: 0,
+		},
+		{
+			name: "das on multi space whitespace selects sentence",
+			text: "One two.   Three four.", cursor: 10,
+			keys: "das", wantText: "One two.", wantPos: 7,
+		},
+		{
+			name: "counted das selects whole sentences",
+			text: "One two. Three four. Five six.", cursor: 12,
+			keys: "2das", wantText: "One two.", wantPos: 7,
+		},
+		{
+			name: "d2as selects whole sentences",
+			text: "One two. Three four. Five six.", cursor: 12,
+			keys: "d2as", wantText: "One two.", wantPos: 7,
+		},
+		{
+			name: "counted cas selects whole sentences",
+			text: "One two. Three four. Five six.", cursor: 12,
+			keys: "c2asQ<esc>", wantText: "One two.Q", wantPos: 8,
+		},
+		{
+			name: "3das clamps to available sentences",
+			text: "One two. Three four. Five six.", cursor: 12,
+			keys: "3das", wantText: "One two.", wantPos: 7,
+		},
+		{
+			name: "counted dis steps sentence parts",
+			text: "One two. Three four. Five six.", cursor: 12,
+			keys: "2dis", wantText: "One two. Five six.", wantPos: 9,
+		},
+		{
+			name: "das on last sentence uses leading whitespace",
+			text: "One two. Three four. Five six.", cursor: 25,
+			keys: "das", wantText: "One two. Three four.", wantPos: 19,
+		},
+		{
+			name: "dis on whitespace selects whitespace run",
+			text: "One two. Three four. Five six.", cursor: 8,
+			keys: "dis", wantText: "One two.Three four. Five six.", wantPos: 8,
+		},
+		{
+			name: "das on end whitespace is empty object",
+			text: "One two.   ", cursor: 9,
+			keys: "das", wantText: "One two.   ", wantPos: 8,
+		},
+		{
+			name: "overshot dis keeps sentence end parity",
+			text: "One two. ", cursor: 2,
+			keys: "3dis", wantText: " ", wantPos: 0,
+		},
+		{
+			name: "das spans multiline sentence",
+			text: "One\ntwo here. Three.", cursor: 5,
+			keys: "das", wantText: "Three.", wantPos: 0,
+		},
+		{
+			name: "das trailing whitespace stops at blank line",
+			text: "One two.\n\nThree.", cursor: 2,
+			keys: "das", wantText: "\nThree.", wantPos: 0,
+		},
+		{
+			name: "cas dot repeat reselects sentence",
+			text: "One two. Three four. Five six.", cursor: 12,
+			keys: "casQ<esc>.", wantText: "One two.Q", wantPos: 8,
+		},
+		{
+			name: "dot repeat of counted das",
+			text: "One two. Three four. Five six.", cursor: 12,
+			keys: "2das.", wantText: "", wantPos: 0,
+		},
+		{
 			name: "dot repeats bracket change",
 			text: "(a)b(c", cursor: 5,
 			keys: "c[(Q<esc>.", wantText: "(a)bQc", wantPos: 4,
@@ -256,6 +336,12 @@ func TestOracleRegisterContents(t *testing.T) {
 		{name: "dot repeat search change register", text: "xx yy xx yy zz", cursor: 2, keys: "c/xx<enter>Q<esc>.", wantText: "xxQxx yy zz", wantReg: "Q"},
 		{name: "counted dd clamps register", text: "one\ntwo", cursor: 0, keys: "3dd", wantText: "", wantReg: "one\ntwo\n"},
 		{name: "bracket change dot register", text: "(a)b(c", cursor: 5, keys: "c[(Q<esc>.", wantText: "(a)bQc", wantReg: "("},
+		{name: "das on whitespace register", text: "One two. Three four. Five six.", cursor: 8, keys: "das", wantText: "One two. Five six.", wantReg: " Three four."},
+		{name: "das leading whitespace register", text: " One two. Three four.", cursor: 0, keys: "das", wantText: "Three four.", wantReg: " One two. "},
+		{name: "counted das register", text: "One two. Three four. Five six.", cursor: 12, keys: "2das", wantText: "One two.", wantReg: " Three four. Five six."},
+		{name: "das end whitespace register untouched", text: "One two.   ", cursor: 9, keys: "das", wantText: "One two.   ", wantReg: ""},
+		{name: "das blank line register", text: "One two.\n\nThree.", cursor: 2, keys: "das", wantText: "\nThree.", wantReg: "One two.\n"},
+		{name: "cas dot repeat register", text: "One two. Three four. Five six.", cursor: 12, keys: "casQ<esc>.", wantText: "One two.Q", wantReg: " QFive six."},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
