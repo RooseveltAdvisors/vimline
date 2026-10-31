@@ -97,6 +97,31 @@ func TestV031OracleRegressions(t *testing.T) {
 			keys: "wma0c`aQ<esc>.", wantText: "Qo", wantPos: 0,
 		},
 		{
+			name: "mark keeps absolute column after same-line delete",
+			text: "one two", cursor: 4,
+			keys: "ma0xx`a", wantText: "e two", wantPos: 4,
+		},
+		{
+			name: "mark keeps absolute column after earlier-line delete",
+			text: "one\ntwo three", cursor: 6,
+			keys: "ma-0xx`a", wantText: "e\ntwo three", wantPos: 4,
+		},
+		{
+			name: "mark-driven change after earlier-line delete replays",
+			text: "one\ntwo three", cursor: 6,
+			keys: "ma-0xxc`aQ<esc>.", wantText: "Q three", wantPos: 0,
+		},
+		{
+			name: "mark keeps absolute column across line join",
+			text: "one\ntwoxyz", cursor: 6,
+			keys: "ma-0lld/w<enter>`a", wantText: "onwoxyz", wantPos: 4,
+		},
+		{
+			name: "mark inside deleted span keeps absolute column",
+			text: "one two", cursor: 1,
+			keys: "ma0d2l`a", wantText: "e two", wantPos: 1,
+		},
+		{
 			name: "dot repeats bracket change",
 			text: "(a)b(c", cursor: 5,
 			keys: "c[(Q<esc>.", wantText: "(a)bQc", wantPos: 4,
