@@ -6,8 +6,8 @@ machine lives here; every consumer renders.
 Three packages:
 
 - `vimline` - the editor: modal insert, normal, and replace states, motions,
-  operators with counts, one unnamed register, undo and redo, replace mode,
-  dot repeat, and the `jj` exit idiom.
+  operators with counts, text objects, search, marks, shifts, one unnamed
+  register, undo and redo, replace mode, dot repeat, and the `jj` exit idiom.
 - `vimline/duration` - the time grammar: `3h`, `2w`, `1d12h`, `tomorrow`,
   `clear`, resolving to an absolute time plus a human description.
 - `vimline/keys` - the chord layer: `Split` and `Dispatcher`, detailed below.
@@ -87,7 +87,7 @@ without coupling releases.
 ## Install
 
 ```
-go get github.com/RooseveltAdvisors/vimline@v0.1.0
+go get github.com/RooseveltAdvisors/vimline@v0.3.1
 ```
 
 Tagged releases only. Pin deliberately; do not float a branch head. The pinned

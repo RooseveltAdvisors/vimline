@@ -746,8 +746,10 @@ func (e *Editor) findChar(m rune, count int) (int, bool) {
 	return e.findCharLine(m, e.findCh, count, false)
 }
 
-// move applies one motion and returns the target cursor. ok is false when a
-// character search or bracket match finds nothing, which in vim aborts the command.
+// move applies one motion and returns the target cursor. ok is false when
+// the motion finds no destination: a character search or bracket match finds
+// nothing, no target sentence exists, or a line motion (+, -) sits at the
+// buffer edge. Vim aborts the command then.
 func (e *Editor) move(m rune, count int) (int, bool) {
 	if count < 1 {
 		count = 1
@@ -919,7 +921,9 @@ func (e *Editor) lineAt(p int) (contentStart, contentEnd, delStart, delEnd int) 
 }
 
 // lineSpanDelta returns the line-wise content and delete span covering the
-// current line plus delta lines (+count for j, -count for k).
+// current line plus delta lines (+count for j, -count for k). ok is false
+// when a nonzero delta clamps onto the current line at a buffer edge, so the
+// operator aborts like vim (dj/dk at the edge do nothing).
 func (e *Editor) lineSpanDelta(p, delta int) (contentStart, contentEnd, delStart, delEnd int, ok bool) {
 	starts := []int{0}
 	for i, r := range e.text {
