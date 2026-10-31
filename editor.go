@@ -44,10 +44,15 @@ const (
 	ActPageDown
 )
 
+type markPos struct {
+	lineStart int
+	col       int
+}
+
 type undoSnap struct {
 	text          []rune
 	cursor        int
-	marks         map[rune]int
+	marks         map[rune]markPos
 	redoCursor    int
 	hasRedoCursor bool
 }
@@ -100,7 +105,7 @@ type Editor struct {
 	historyCursor int
 	redoCursor    int
 	replaceSteps  []replaceStep
-	marks         map[rune]int
+	marks         map[rune]markPos
 	searching     bool
 	searchInput   []rune
 	searchDir     int
@@ -117,7 +122,7 @@ type Editor struct {
 
 func New(s string) *Editor {
 	rs := []rune(s)
-	e := &Editor{text: rs, cursor: len(rs), mode: ModeInsert, marks: make(map[rune]int)}
+	e := &Editor{text: rs, cursor: len(rs), mode: ModeInsert, marks: make(map[rune]markPos)}
 	e.beginChange('i', 1)
 	return e
 }
@@ -214,8 +219,8 @@ func (e *Editor) undoLineEdit() {
 	e.normalCursorClamp()
 }
 
-func cloneMarks(src map[rune]int) map[rune]int {
-	dst := make(map[rune]int, len(src))
+func cloneMarks[T any](src map[rune]T) map[rune]T {
+	dst := make(map[rune]T, len(src))
 	for k, v := range src {
 		dst[k] = v
 	}
@@ -1088,31 +1093,23 @@ func (e *Editor) deleteRange(a, b int) {
 	e.pushUndo()
 	e.reg = append([]rune(nil), e.text[a:b]...)
 	e.regMarks = make(map[rune]int)
-	for name, p := range e.marks {
-		if p >= a && p < b {
+	for name, m := range e.marks {
+		if p := m.lineStart + m.col; p >= a && p < b {
 			e.regMarks[name] = p - a
 		}
 	}
 	e.regLinewise = false
 	lineStart, _, _, _ := e.lineAt(a)
-	_, joinLimit, _, _ := e.lineAt(b)
-	joinEnd := a + joinLimit - b
-	for name, p := range e.marks {
-		markStart, _, _, _ := e.lineAt(p)
-		col := p - markStart
-		np := p
+	prefix := a - lineStart
+	for name, m := range e.marks {
+		nm := m
 		switch {
-		case p < a || markStart == lineStart:
-			np = p
-		case markStart < b:
-			np = a + col
-		default:
-			np = p - (b - a)
+		case m.lineStart > lineStart && m.lineStart <= b:
+			nm = markPos{lineStart, m.col + prefix}
+		case m.lineStart > b:
+			nm = markPos{m.lineStart - (b - a), m.col}
 		}
-		if markStart < b && np > joinEnd {
-			np = joinEnd
-		}
-		e.marks[name] = np
+		e.marks[name] = nm
 	}
 	out := make([]rune, 0, len(e.text)-(b-a))
 	out = append(out, e.text[:a]...)
@@ -1454,11 +1451,12 @@ func (e *Editor) operateSpan(op rune, start, end int) {
 // markTarget resolves a mark jump to its buffer offset. A ' target lands on
 // the first non-blank character of the mark's line.
 func (e *Editor) markTarget(kind, r rune) (int, bool) {
-	p, exists := e.marks[r]
+	m, exists := e.marks[r]
 	if !exists {
 		return 0, false
 	}
-	lineStart, lineEnd, _, _ := e.lineAt(p)
+	lineStart, lineEnd, _, _ := e.lineAt(m.lineStart)
+	p := m.lineStart + m.col
 	if p >= lineEnd {
 		p = lineStart
 		if lineEnd > lineStart {
@@ -2093,7 +2091,8 @@ func (e *Editor) paste(before bool, count int) {
 			if atEnd {
 				markAt++
 			}
-			e.marks[name] = markAt
+			ls, _, _, _ := e.lineAt(markAt)
+			e.marks[name] = markPos{ls, markAt - ls}
 		}
 		_, lineEnd, _, _ := e.lineAt(e.cursor)
 		for e.cursor < lineEnd && isSpaceNotNL(e.text[e.cursor]) {
@@ -2321,7 +2320,8 @@ func (e *Editor) Feed(key string) Action {
 		}
 		if r, ok := e.printable(key); ok {
 			if kind == 'm' {
-				e.marks[r] = e.cursor
+				ls, _, _, _ := e.lineAt(e.cursor)
+				e.marks[r] = markPos{ls, e.cursor - ls}
 			} else if p, exists := e.markTarget(kind, r); exists {
 				if op == 0 {
 					e.cursor = p

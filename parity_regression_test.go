@@ -122,6 +122,31 @@ func TestV031OracleRegressions(t *testing.T) {
 			keys: "ma0d2l`a", wantText: "e two", wantPos: 1,
 		},
 		{
+			name: "over-eol mark survives d dollar then insert",
+			text: "one two", cursor: 6,
+			keys: "ma0d$iabc<esc>`a", wantText: "abc", wantPos: 2,
+		},
+		{
+			name: "over-eol mark survives dw then insert",
+			text: "one two", cursor: 6,
+			keys: "ma0dw0iZZZZ<esc>`a", wantText: "ZZZZtwo", wantPos: 6,
+		},
+		{
+			name: "join change replays at over-eol mark",
+			text: "one\ntwoxyz", cursor: 9,
+			keys: "ma-0lld/o<enter>A23<esc>0c`aQ<esc>", wantText: "Q3", wantPos: 0,
+		},
+		{
+			name: "long interior line delete keeps mark jump",
+			text: "ab\nXXXXXXXXXX\ncd", cursor: 12,
+			keys: "ma-lde`a", wantText: "a\ncd", wantPos: 0,
+		},
+		{
+			name: "long interior line delete keeps mark column",
+			text: "ab\nXXXXXXXXXX\ncd", cursor: 12,
+			keys: "ma-lde0i0123456789<esc>`a", wantText: "0123456789a\ncd", wantPos: 10,
+		},
+		{
 			name: "dot repeats bracket change",
 			text: "(a)b(c", cursor: 5,
 			keys: "c[(Q<esc>.", wantText: "(a)bQc", wantPos: 4,
