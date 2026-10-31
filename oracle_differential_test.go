@@ -46,6 +46,7 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 		{Name: "dot repeats backward search delete", Text: "aa xx bb xx cc", Pos: 12, Keys: splitOracleKeys("d?xx<cr>.")},
 		{Name: "dot repeats backward search change", Text: "aa xx bb xx cc", Pos: 12, Keys: splitOracleKeys("c?xx<cr>Q<esc>.")},
 		{Name: "dot repeats mark change", Text: "one two three", Pos: 0, Keys: splitOracleKeys("wmac`aQ<esc>.")},
+		{Name: "dot repeat keeps mark absolute column", Text: "one two", Pos: 0, Keys: splitOracleKeys("wma0c`aQ<esc>.")},
 		{Name: "dot repeats bracket change", Text: "(a)b(c", Pos: 5, Keys: splitOracleKeys("c[(Q<esc>.")},
 		{Name: "bracket change undoes atomically", Text: "(a)b(c", Pos: 5, Keys: splitOracleKeys("c[(Q<esc>u")},
 		{Name: "counted dd clamps to remaining lines", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("3dd")},

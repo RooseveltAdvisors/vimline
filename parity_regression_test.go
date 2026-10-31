@@ -92,6 +92,11 @@ func TestV031OracleRegressions(t *testing.T) {
 			keys: "wmac`aQ<esc>.", wantText: "one QQtwo three", wantPos: 4,
 		},
 		{
+			name: "dot repeat keeps mark at absolute column after delete",
+			text: "one two", cursor: 0,
+			keys: "wma0c`aQ<esc>.", wantText: "Qo", wantPos: 0,
+		},
+		{
 			name: "dot repeats bracket change",
 			text: "(a)b(c", cursor: 5,
 			keys: "c[(Q<esc>.", wantText: "(a)bQc", wantPos: 4,

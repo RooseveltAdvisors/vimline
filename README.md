@@ -34,6 +34,11 @@ v := e.View("/", true)        // Label, Text, Cursor, Mode, Pending, Count
 `bs`, `left`, `right`, `up`, `down`, `ctrl-u`, `ctrl-w`, `ctrl-k`, `ctrl-y`,
 `ctrl-r`, `ctrl-n`, `ctrl-p`, `ctrl-d`, or a single printable character.
 
+Known gap: search patterns use Go's `regexp` engine. Vim-specific pattern
+atoms are not translated, so Vim pattern syntax is not supported in v0.3.1.
+The Vim-to-RE2 translation layer and nvim differential pattern tests are
+tracked for a later release in `wiseman-tftd`.
+
 ## Binding acceptance
 
 These seven behaviors are the contract. `editor_test.go` and

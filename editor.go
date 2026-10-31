@@ -1094,15 +1094,24 @@ func (e *Editor) deleteRange(a, b int) {
 		}
 	}
 	e.regLinewise = false
+	deletedLineBreak := false
+	for _, r := range e.text[a:b] {
+		if r == '\n' {
+			deletedLineBreak = true
+			break
+		}
+	}
 	out := make([]rune, 0, len(e.text)-(b-a))
 	out = append(out, e.text[:a]...)
 	out = append(out, e.text[b:]...)
 	e.text = out
 	for name, p := range e.marks {
 		switch {
-		case p >= b:
+		case p >= b && deletedLineBreak:
+			// Vim keeps a mark's absolute column when characters before it are
+			// deleted. Only a removed line break moves marks after the range.
 			e.marks[name] = p - (b - a)
-		case p >= a:
+		case p >= a && p < b:
 			e.marks[name] = a
 		}
 	}
@@ -1445,6 +1454,13 @@ func (e *Editor) markTarget(kind, r rune) (int, bool) {
 	p, exists := e.marks[r]
 	if !exists {
 		return 0, false
+	}
+	lineStart, lineEnd, _, _ := e.lineAt(p)
+	if p >= lineEnd {
+		p = lineStart
+		if lineEnd > lineStart {
+			p = lineEnd - 1
+		}
 	}
 	if kind == '\'' {
 		old := e.cursor
