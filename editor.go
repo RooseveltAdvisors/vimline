@@ -89,6 +89,7 @@ type Editor struct {
 	changeFindK   rune
 	changeFindCh  rune
 	changeRepeat  bool
+	changeSpan    func(*Editor, int) (int, int, bool)
 	changeCount   int
 	changeFrom    int
 	changeUndoAt  int
@@ -460,7 +461,7 @@ func (e *Editor) operatePercent(op rune, percent int) {
 	cur := e.lineIndexAt(lines, e.cursor)
 	tgt := e.lineIndexAt(lines, target)
 	column := e.cursorColumn(e.cursor)
-	cs, ce, ds, de := e.lineSpanDelta(e.cursor, tgt-cur)
+	cs, ce, ds, de, _ := e.lineSpanDelta(e.cursor, tgt-cur)
 	reg := e.linewiseRegister(cs, ce)
 	switch op {
 	case 'y':
@@ -863,7 +864,13 @@ func (e *Editor) move(m rune, count int) (int, bool) {
 			delta = -count
 		}
 		target := cur + delta
-		if target < 0 || target >= len(lines) {
+		if target < 0 {
+			target = 0
+		}
+		if target >= len(lines) {
+			target = len(lines) - 1
+		}
+		if target == cur {
 			return p, false
 		}
 		p = lines[target][0]
@@ -912,7 +919,7 @@ func (e *Editor) lineAt(p int) (contentStart, contentEnd, delStart, delEnd int) 
 
 // lineSpanDelta returns the line-wise content and delete span covering the
 // current line plus delta lines (+count for j, -count for k).
-func (e *Editor) lineSpanDelta(p, delta int) (contentStart, contentEnd, delStart, delEnd int) {
+func (e *Editor) lineSpanDelta(p, delta int) (contentStart, contentEnd, delStart, delEnd int, ok bool) {
 	starts := []int{0}
 	for i, r := range e.text {
 		if r == '\n' {
@@ -932,6 +939,7 @@ func (e *Editor) lineSpanDelta(p, delta int) (contentStart, contentEnd, delStart
 	if other >= len(starts) {
 		other = len(starts) - 1
 	}
+	ok = delta == 0 || other != cur
 	first, last := cur, other
 	if first > last {
 		first, last = last, first
@@ -947,7 +955,7 @@ func (e *Editor) lineSpanDelta(p, delta int) (contentStart, contentEnd, delStart
 	} else if contentStart > 0 {
 		delStart = contentStart - 1
 	}
-	return contentStart, contentEnd, delStart, delEnd
+	return contentStart, contentEnd, delStart, delEnd, ok
 }
 
 // rangeFor maps an operator motion onto a half-open [start,end) span.
@@ -1129,6 +1137,7 @@ func (e *Editor) beginChange(m rune, count int) {
 	e.changeFindK = 0
 	e.changeFindCh = 0
 	e.changeRepeat = false
+	e.changeSpan = nil
 	e.changeCount = count
 	e.changeFrom = e.cursor
 	e.historyCursor = e.cursor
@@ -1170,6 +1179,7 @@ func (e *Editor) endChange() {
 	findCh := e.changeFindCh
 	findRep := e.changeRepeat
 	count := e.changeCount
+	changeSpan := e.changeSpan
 	from, to := e.changeFrom, e.cursor
 	if from < 0 {
 		from = 0
@@ -1249,7 +1259,10 @@ func (e *Editor) endChange() {
 			if lineCount < 1 {
 				lineCount = 1
 			}
-			cs, ce, _, _ := ed.lineSpanDelta(ed.cursor, lineCount-1)
+			cs, ce, _, _, ok := ed.lineSpanDelta(ed.cursor, lineCount-1)
+			if !ok {
+				return
+			}
 			lineReg := ed.linewiseRegister(cs, ce)
 			insertAt := cs
 			for insertAt < ce && isSpaceNotNL(ed.text[insertAt]) {
@@ -1265,7 +1278,10 @@ func (e *Editor) endChange() {
 			if lineCount < 1 {
 				lineCount = 1
 			}
-			cs, ce, _, _ := ed.lineSpanDelta(ed.cursor, lineCount-1)
+			cs, ce, _, _, ok := ed.lineSpanDelta(ed.cursor, lineCount-1)
+			if !ok {
+				return
+			}
 			lineReg := ed.linewiseRegister(cs, ce)
 			ed.deleteRange(cs, ce)
 			ed.reg = lineReg
@@ -1344,7 +1360,14 @@ func (e *Editor) endChange() {
 			ed.deleteRange(q, end)
 			ed.insertRunes(ins)
 		default:
-			if s, en, ok := ed.rangeFor(kind, repeatCount); ok {
+			if changeSpan != nil {
+				s, en, ok := changeSpan(ed, repeatCount)
+				if !ok {
+					return
+				}
+				ed.deleteRange(s, en)
+				ed.insertRunes(ins)
+			} else if s, en, ok := ed.rangeFor(kind, repeatCount); ok {
 				ed.deleteRange(s, en)
 				ed.insertRunes(ins)
 			}
@@ -1407,6 +1430,53 @@ func (e *Editor) operateSpan(op rune, start, end int) {
 		e.setLastUndoRedoCursor(e.cursor)
 	case 'c':
 		e.deleteRange(start, end)
+		e.mode = ModeInsert
+	}
+}
+
+// markTarget resolves a mark jump to its buffer offset. A ' target lands on
+// the first non-blank character of the mark's line.
+func (e *Editor) markTarget(kind, r rune) (int, bool) {
+	p, exists := e.marks[r]
+	if !exists {
+		return 0, false
+	}
+	if kind == '\'' {
+		old := e.cursor
+		e.cursor = p
+		p, _ = e.move('^', 1)
+		e.cursor = old
+	}
+	return p, true
+}
+
+// operateMotionSpan applies op over the span a cursor-relative motion resolves
+// to and records exact '.' replay for the delete and change forms.
+func (e *Editor) operateMotionSpan(op rune, count int, span func(*Editor, int) (int, int, bool)) {
+	s, en, ok := span(e, count)
+	if !ok {
+		return
+	}
+	if s != en {
+		e.operateSpan(op, s, en)
+	}
+	switch op {
+	case 'd':
+		cc := count
+		e.lastEdit = func(ed *Editor) {
+			repeat := cc
+			if ed.dotCount > 0 {
+				repeat = ed.dotCount
+			}
+			s, en, ok := span(ed, repeat)
+			if !ok || s == en {
+				return
+			}
+			ed.operateSpan('d', s, en)
+		}
+	case 'c':
+		e.beginChange('0', count)
+		e.changeSpan = span
 		e.mode = ModeInsert
 	}
 }
@@ -1586,11 +1656,11 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 		lines := e.lineBounds()
 		curLine := e.lineIndexAt(lines, e.cursor)
 		targetLine := 0
-		if explicitCount && count-1 < len(lines) {
-			targetLine = count - 1
+		if explicitCount {
+			targetLine = min(count-1, len(lines)-1)
 		}
 		column := e.cursorColumn(e.cursor)
-		cs, ce, ds, de := e.lineSpanDelta(e.cursor, targetLine-curLine)
+		cs, ce, ds, de, _ := e.lineSpanDelta(e.cursor, targetLine-curLine)
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
 		case 'y':
@@ -1606,10 +1676,10 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 				ls := ed.lineBounds()
 				cl := ed.lineIndexAt(ls, ed.cursor)
 				tgt := 0
-				if exp && tl < len(ls) {
-					tgt = tl
+				if exp {
+					tgt = min(tl, len(ls)-1)
 				}
-				_, _, a, b := ed.lineSpanDelta(ed.cursor, tgt-cl)
+				_, _, a, b, _ := ed.lineSpanDelta(ed.cursor, tgt-cl)
 				ed.deleteRange(a, b)
 				ed.placeAtColumn(a, column)
 			}
@@ -1705,13 +1775,11 @@ func (e *Editor) operate(op, m rune, count int) {
 		if delta < 0 {
 			delta = 0
 		}
-		lines := e.lineBounds()
-		curLine := e.lineIndexAt(lines, e.cursor)
-		if curLine+delta >= len(lines) {
+		cs, ce, ds, de, ok := e.lineSpanDelta(e.cursor, delta)
+		if !ok {
 			return
 		}
 		column := e.cursorColumn(e.cursor)
-		cs, ce, ds, de := e.lineSpanDelta(e.cursor, delta)
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
 		case 'y':
@@ -1724,7 +1792,10 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.placeAtColumn(ds, column)
 			d := delta
 			e.lastEdit = func(ed *Editor) {
-				_, _, a, b := ed.lineSpanDelta(ed.cursor, d)
+				_, _, a, b, ok := ed.lineSpanDelta(ed.cursor, d)
+				if !ok {
+					return
+				}
 				ed.deleteRange(a, b)
 				ed.placeAtColumn(a, column)
 			}
@@ -1751,7 +1822,7 @@ func (e *Editor) operate(op, m rune, count int) {
 		curLine := e.lineIndexAt(lines, e.cursor)
 		targetLine := len(lines) - 1
 		column := e.cursorColumn(e.cursor)
-		cs, ce, ds, de := e.lineSpanDelta(e.cursor, targetLine-curLine)
+		cs, ce, ds, de, _ := e.lineSpanDelta(e.cursor, targetLine-curLine)
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
 		case 'y':
@@ -1765,7 +1836,7 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.lastEdit = func(ed *Editor) {
 				ls := ed.lineBounds()
 				cl := ed.lineIndexAt(ls, ed.cursor)
-				_, _, a, b := ed.lineSpanDelta(ed.cursor, (len(ls)-1)-cl)
+				_, _, a, b, _ := ed.lineSpanDelta(ed.cursor, (len(ls)-1)-cl)
 				ed.deleteRange(a, b)
 				ed.placeAtColumn(a, column)
 			}
@@ -1813,8 +1884,11 @@ func (e *Editor) operate(op, m rune, count int) {
 		if m == 'k' || m == '-' {
 			delta = -count
 		}
+		cs, ce, ds, de, ok := e.lineSpanDelta(e.cursor, delta)
+		if !ok {
+			return
+		}
 		column := e.cursorColumn(e.cursor)
-		cs, ce, ds, de := e.lineSpanDelta(e.cursor, delta)
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
 		case 'y':
@@ -1827,7 +1901,10 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.placeAtColumn(ds, column)
 			d := delta
 			e.lastEdit = func(ed *Editor) {
-				_, _, a, b := ed.lineSpanDelta(ed.cursor, d)
+				_, _, a, b, ok := ed.lineSpanDelta(ed.cursor, d)
+				if !ok {
+					return
+				}
 				ed.deleteRange(a, b)
 				ed.placeAtColumn(a, column)
 			}
@@ -2185,16 +2262,18 @@ func (e *Editor) Feed(key string) Action {
 					e.lastSearchDir = e.searchDir
 				}
 				if e.searchOp != 0 {
-					start := e.cursor
-					if p < start {
-						e.operateSpan(e.searchOp, p, start)
-					} else {
-						e.operateSpan(e.searchOp, start, p)
-					}
-					if e.searchOp == 'c' {
-						e.beginChange('0', 1)
-						e.mode = ModeInsert
-					}
+					op, dir, cnt := e.searchOp, e.searchDir, e.searchCount
+					pat := append([]rune(nil), pattern...)
+					e.operateMotionSpan(op, cnt, func(ed *Editor, count int) (int, int, bool) {
+						t, ok := ed.searchPattern(pat, dir, count)
+						if !ok {
+							return 0, 0, false
+						}
+						if t < ed.cursor {
+							return t, ed.cursor, true
+						}
+						return ed.cursor, t, true
+					})
 				} else {
 					e.cursor = p
 				}
@@ -2211,6 +2290,7 @@ func (e *Editor) Feed(key string) Action {
 	}
 	if e.pending == 'm' || e.pending == '`' || e.pending == '\'' {
 		kind, op := e.pending, e.pendingOp
+		cnt := e.totalOpCount()
 		e.pending, e.pendingOp = 0, 0
 		if key == "esc" {
 			return ActStay
@@ -2218,24 +2298,21 @@ func (e *Editor) Feed(key string) Action {
 		if r, ok := e.printable(key); ok {
 			if kind == 'm' {
 				e.marks[r] = e.cursor
-			} else if p, exists := e.marks[r]; exists {
-				if kind == '\'' {
-					old := e.cursor
-					e.cursor = p
-					p, _ = e.move('^', 1)
-					e.cursor = old
-				}
+			} else if p, exists := e.markTarget(kind, r); exists {
 				if op == 0 {
 					e.cursor = p
 					e.normalCursorClamp()
-				} else if p < e.cursor {
-					e.operateSpan(op, p, e.cursor)
-				} else if p > e.cursor {
-					e.operateSpan(op, e.cursor, p)
-				}
-				if op == 'c' {
-					e.beginChange('0', 1)
-					e.mode = ModeInsert
+				} else {
+					e.operateMotionSpan(op, cnt, func(ed *Editor, count int) (int, int, bool) {
+						t, ok := ed.markTarget(kind, r)
+						if !ok {
+							return 0, 0, false
+						}
+						if t < ed.cursor {
+							return t, ed.cursor, true
+						}
+						return ed.cursor, t, true
+					})
 				}
 			}
 		}
@@ -2246,14 +2323,21 @@ func (e *Editor) Feed(key string) Action {
 		cnt := e.totalOpCount()
 		e.pending, e.pendingOp = 0, 0
 		if sub, ok := e.printable(key); ok {
-			if p, found := e.unmatchedBracket(prefix, sub, cnt); found {
-				if op == 0 {
+			if op == 0 {
+				if p, found := e.unmatchedBracket(prefix, sub, cnt); found {
 					e.cursor = p
-				} else if p < e.cursor {
-					e.operateSpan(op, p, e.cursor)
-				} else {
-					e.operateSpan(op, e.cursor, p+1)
 				}
+			} else {
+				e.operateMotionSpan(op, cnt, func(ed *Editor, count int) (int, int, bool) {
+					p, found := ed.unmatchedBracket(prefix, sub, count)
+					if !found {
+						return 0, 0, false
+					}
+					if p < ed.cursor {
+						return p, ed.cursor, true
+					}
+					return ed.cursor, p + 1, true
+				})
 			}
 		}
 		return ActStay
@@ -2647,7 +2731,10 @@ func (e *Editor) feedNormal(key string) Action {
 			return ActStay
 		case 'S':
 			n := e.takeCount()
-			cs, ce, _, _ := e.lineSpanDelta(e.cursor, n-1)
+			cs, ce, _, _, ok := e.lineSpanDelta(e.cursor, n-1)
+			if !ok {
+				return ActStay
+			}
 			lineReg := e.linewiseRegister(cs, ce)
 			e.deleteRange(cs, ce)
 			e.reg = lineReg
@@ -2749,7 +2836,10 @@ func (e *Editor) feedNormal(key string) Action {
 			return ActStay
 		case 'Y':
 			n := e.takeCount()
-			start, end, _, _ := e.lineSpanDelta(e.cursor, n-1)
+			start, end, _, _, ok := e.lineSpanDelta(e.cursor, n-1)
+			if !ok {
+				return ActStay
+			}
 			e.reg = e.linewiseRegister(start, end)
 			e.regLinewise = true
 			return ActStay

@@ -41,6 +41,26 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 		{Name: "atomic redo", Text: "one (a (b) c)", Pos: 0, Keys: splitOracleKeys("cwQQ<esc>u<ctrl-r>")},
 		{Name: "replace mode", Text: "abcdef", Pos: 0, Keys: splitOracleKeys("RXYZ<esc>")},
 		{Name: "open below", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("oQQ<esc>")},
+		{Name: "dot repeats search delete", Text: "xx yy xx yy zz", Pos: 2, Keys: splitOracleKeys("d/xx<cr>.")},
+		{Name: "dot repeats search change", Text: "xx yy xx yy zz", Pos: 2, Keys: splitOracleKeys("c/xx<cr>Q<esc>.")},
+		{Name: "dot repeats backward search delete", Text: "aa xx bb xx cc", Pos: 12, Keys: splitOracleKeys("d?xx<cr>.")},
+		{Name: "dot repeats backward search change", Text: "aa xx bb xx cc", Pos: 12, Keys: splitOracleKeys("c?xx<cr>Q<esc>.")},
+		{Name: "dot repeats mark change", Text: "one two three", Pos: 0, Keys: splitOracleKeys("wmac`aQ<esc>.")},
+		{Name: "dot repeats bracket change", Text: "(a)b(c", Pos: 5, Keys: splitOracleKeys("c[(Q<esc>.")},
+		{Name: "bracket change undoes atomically", Text: "(a)b(c", Pos: 5, Keys: splitOracleKeys("c[(Q<esc>u")},
+		{Name: "counted dd clamps to remaining lines", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("3dd")},
+		{Name: "counted cc clamps to remaining lines", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("3ccX<esc>")},
+		{Name: "counted yy clamps to remaining lines", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("3yy")},
+		{Name: "counted d underscore clamps", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("3d_")},
+		{Name: "2dd aborts on single line", Text: "one", Pos: 0, Keys: splitOracleKeys("2dd")},
+		{Name: "2S aborts on single line", Text: "one", Pos: 0, Keys: splitOracleKeys("2SX<esc>")},
+		{Name: "d plus aborts on last line", Text: "one\ntwo", Pos: 4, Keys: splitOracleKeys("d+")},
+		{Name: "d minus aborts on first line", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("d-")},
+		{Name: "dot repeat of counted dd aborts at edge", Text: "one\ntwo\nthree", Pos: 0, Keys: splitOracleKeys("2dd.")},
+		{Name: "counted Y clamps to remaining lines", Text: "one\ntwo", Pos: 0, Keys: splitOracleKeys("3Y")},
+		{Name: "2Y aborts on single line", Text: "one", Pos: 0, Keys: splitOracleKeys("2Y")},
+		{Name: "counted plus clamps at last line", Text: "one\ntwo\nthree", Pos: 1, Keys: splitOracleKeys("3+")},
+		{Name: "counted minus clamps at first line", Text: "one\ntwo\nthree", Pos: 9, Keys: splitOracleKeys("3-")},
 	}
 	for i := range cases {
 		before := []rune(cases[i].Text)[:cases[i].Pos]
@@ -121,6 +141,8 @@ vim.cmd('qa!')
 					key = "ctrl-r"
 				case "\x08":
 					key = "bs"
+				case "\r":
+					key = "enter"
 				}
 				e.Feed(key)
 			}
@@ -134,6 +156,6 @@ vim.cmd('qa!')
 }
 
 func splitOracleKeys(seq string) []string {
-	replacer := strings.NewReplacer("<esc>", "\x1b", "<ctrl-r>", "\x12", "<bs>", "\x08")
+	replacer := strings.NewReplacer("<esc>", "\x1b", "<ctrl-r>", "\x12", "<bs>", "\x08", "<cr>", "\r")
 	return strings.Split(replacer.Replace(seq), "")
 }

@@ -76,6 +76,76 @@ func TestV031OracleRegressions(t *testing.T) {
 			text: "one (a (b) c) x two x three x four x\nsecond line", cursor: 0,
 			keys: "cwQQ<esc>u", wantText: "one (a (b) c) x two x three x four x\nsecond line", wantPos: 0,
 		},
+		{
+			name: "dot repeats search delete",
+			text: "xx yy xx yy zz", cursor: 2,
+			keys: "d/xx<enter>.", wantText: "xx yy zz", wantPos: 0,
+		},
+		{
+			name: "dot repeats search change",
+			text: "xx yy xx yy zz", cursor: 2,
+			keys: "c/xx<enter>Q<esc>.", wantText: "xxQxx yy zz", wantPos: 2,
+		},
+		{
+			name: "dot repeats mark change",
+			text: "one two three", cursor: 0,
+			keys: "wmac`aQ<esc>.", wantText: "one QQtwo three", wantPos: 4,
+		},
+		{
+			name: "dot repeats bracket change",
+			text: "(a)b(c", cursor: 5,
+			keys: "c[(Q<esc>.", wantText: "(a)bQc", wantPos: 4,
+		},
+		{
+			name: "bracket change undoes atomically",
+			text: "(a)b(c", cursor: 5,
+			keys: "c[(Q<esc>u", wantText: "(a)b(c", wantPos: 4,
+		},
+		{
+			name: "mark operator consumes its count",
+			text: "one\ntwo\nthree", cursor: 0,
+			keys: "mad2`add", wantText: "two\nthree", wantPos: 0,
+		},
+		{
+			name: "counted dd clamps to remaining lines",
+			text: "one\ntwo", cursor: 0,
+			keys: "3dd", wantText: "", wantPos: 0,
+		},
+		{
+			name: "counted yy clamps to remaining lines",
+			text: "one\ntwo", cursor: 0,
+			keys: "3yy", wantText: "one\ntwo", wantPos: 0,
+		},
+		{
+			name: "counted d underscore clamps to remaining lines",
+			text: "one\ntwo", cursor: 0,
+			keys: "3d_", wantText: "", wantPos: 0,
+		},
+		{
+			name: "2dd aborts on single line",
+			text: "one", cursor: 0,
+			keys: "2dd", wantText: "one", wantPos: 0,
+		},
+		{
+			name: "2S aborts on single line",
+			text: "one", cursor: 0,
+			keys: "2SX<esc>", wantText: "one", wantPos: 0,
+		},
+		{
+			name: "d plus aborts on last line",
+			text: "one\ntwo", cursor: 4,
+			keys: "d+", wantText: "one\ntwo", wantPos: 4,
+		},
+		{
+			name: "d minus aborts on first line",
+			text: "one\ntwo", cursor: 0,
+			keys: "d-", wantText: "one\ntwo", wantPos: 0,
+		},
+		{
+			name: "dot repeat of counted dd aborts at edge",
+			text: "one\ntwo\nthree", cursor: 0,
+			keys: "2dd.", wantText: "three", wantPos: 0,
+		},
 	}
 
 	for _, tc := range cases {
@@ -128,6 +198,9 @@ func TestOracleRegisterContents(t *testing.T) {
 		{name: "yiw", text: "one two three", cursor: 5, keys: "yiw", wantText: "one two three", wantReg: "two"},
 		{name: "d underscore linewise", text: "one\ntwo", cursor: 1, keys: "d_", wantText: "two", wantReg: "one\n"},
 		{name: "change paragraph", text: "one\ntwo\n\nthree", cursor: 2, keys: "cipQ<esc>", wantText: "Q\n\nthree", wantReg: "one\ntwo\n"},
+		{name: "dot repeat search change register", text: "xx yy xx yy zz", cursor: 2, keys: "c/xx<enter>Q<esc>.", wantText: "xxQxx yy zz", wantReg: "Q"},
+		{name: "counted dd clamps register", text: "one\ntwo", cursor: 0, keys: "3dd", wantText: "", wantReg: "one\ntwo\n"},
+		{name: "bracket change dot register", text: "(a)b(c", cursor: 5, keys: "c[(Q<esc>.", wantText: "(a)bQc", wantReg: "("},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
