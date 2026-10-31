@@ -11,14 +11,14 @@ import (
 	"unicode/utf8"
 )
 
-// edit.go is the shared vim-style line Editor. The search prompt, the sticky
+// editor.go is the shared vim-style line Editor. The search prompt, the sticky
 // note prompt, and the custom tab name field all drive this one type, so the
 // editing feel is identical wherever text is entered.
 //
-// The key inventory follows GNU readline vi-editing-mode and zsh bindkey -v:
-// motions, operators with counts, one unnamed register, undo and redo, and
-// replace mode. j/k and the arrows move the result list, because a single
-// line has no vertical motion to spend them on.
+// The key inventory is Vim-parity against real nvim: motions, operators with
+// counts, text objects, search, marks, shifts, one unnamed register, undo and
+// redo, replace mode, and dot repeat. j/k and the arrows move the result
+// list, because a single line has no vertical motion to spend them on.
 
 type Mode int
 
@@ -169,12 +169,13 @@ func (e *Editor) InsertLiteral(s string) {
 	e.insertRunes([]rune(s))
 }
 
-// PendingJ reports whether insert mode is holding one j for a possible jj.
+// Cursor returns the current cursor offset.
 func (e *Editor) Cursor() int { return e.cursor }
 
 // Mode reports the current editing mode.
 func (e *Editor) Mode() Mode { return e.mode }
 
+// PendingJ reports whether insert mode is holding one j for a possible jj.
 func (e *Editor) PendingJ() bool { return e.pendingJ }
 
 // FlushJ inserts a held j when no second j arrived inside the window.
