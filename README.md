@@ -39,6 +39,14 @@ atoms are not translated, so Vim pattern syntax is not supported in v0.3.1.
 The Vim-to-RE2 translation layer and nvim differential pattern tests are
 tracked for a later release in `wiseman-tftd`.
 
+Known gaps recorded against nvim 0.12.5 (each verified live, none silently
+dropped): a counted `w`/`W` operator that ends in column 0 of a later line
+joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
+`d'a`/`y'a` with the apostrophe mark run charwise where nvim is linewise; a
+charwise put of multi-line text leaves the cursor at the end of the put where
+nvim leaves it at the start; and `>>` places the cursor in column 0 where nvim
+keeps the virtual column (tabs are one rune here).
+
 ## Binding acceptance
 
 These seven behaviors are the contract. `editor_test.go` and

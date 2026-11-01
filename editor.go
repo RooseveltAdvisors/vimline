@@ -94,7 +94,7 @@ type Editor struct {
 	changeFindK   rune
 	changeFindCh  rune
 	changeRepeat  bool
-	changeSpan    func(*Editor, int) (int, int, bool)
+	changeSpan    func(*Editor, int) (int, int, bool, bool)
 	changeCount   int
 	changeFrom    int
 	changeUndoAt  int
@@ -487,18 +487,27 @@ func (e *Editor) operatePercent(op rune, percent int) {
 
 func (e *Editor) operateIndent(op, motion rune, count int) {
 	lines := e.lineBounds()
-	if len(lines) > 1 && lines[len(lines)-1][0] == len(e.text) && len(e.text) > 0 && e.text[len(e.text)-1] == '\n' {
-		lines = lines[:len(lines)-1]
-	}
 	cur := e.lineIndexAt(lines, e.cursor)
 	first, last := cur, cur
+	// Line counts clamp at the buffer edge, except that moving down from
+	// the last line or up from the first fails outright (nvim cursor_down /
+	// cursor_up).
 	if motion == op {
+		if count > 1 && cur == len(lines)-1 {
+			return
+		}
 		last = cur + count - 1
 	} else if motion == 'G' {
 		last = len(lines) - 1
 	} else if motion == 'j' || motion == '+' {
+		if cur == len(lines)-1 {
+			return
+		}
 		last = cur + count
 	} else if motion == 'k' || motion == '-' {
+		if cur == 0 {
+			return
+		}
 		first = cur - count
 	} else if s, en, ok := e.rangeFor(motion, count); ok {
 		first = e.lineIndexAt(lines, s)
@@ -510,15 +519,21 @@ func (e *Editor) operateIndent(op, motion rune, count int) {
 	} else {
 		return
 	}
-	if first < 0 || last >= len(lines) {
-		return
+	if first < 0 {
+		first = 0
+	}
+	if last >= len(lines) {
+		last = len(lines) - 1
 	}
 	e.pushUndo()
 	for line := last; line >= first; line-- {
 		start := lines[line][0]
 		switch op {
 		case '>':
-			e.text = append(e.text[:start], append([]rune{'\t'}, e.text[start:]...)...)
+			// nvim's op_shift leaves empty lines alone.
+			if start < len(e.text) && e.text[start] != '\n' {
+				e.text = append(e.text[:start], append([]rune{'\t'}, e.text[start:]...)...)
+			}
 		case '<':
 			if start < len(e.text) && e.text[start] == '\t' {
 				e.text = append(e.text[:start], e.text[start+1:]...)
@@ -981,27 +996,18 @@ func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 	case ')':
 		return start, target, true
 	case '}':
-		ls, le, _, _ := e.lineAt(start)
-		blank := isBlankLine(e.text, ls, le)
-		firstNonBlank := ls
-		for firstNonBlank < le && isSpaceNotNL(e.text[firstNonBlank]) {
-			firstNonBlank++
-		}
-		linewise := blank || start == firstNonBlank
-		if linewise {
-			start = ls
-		}
 		if target == len(e.text)-1 && target >= start {
+			// No blank line follows: the motion stops on the last character
+			// and becomes inclusive.
 			return start, len(e.text), true
-		}
-		if !linewise && target > start && target > 0 && e.text[target-1] == '\n' {
-			target--
 		}
 		return start, target, true
 	case '$':
-		end := target + 1
-		if end > len(e.text) {
-			end = len(e.text)
+		// The target is the line's last character, or its break when the
+		// line is empty; an empty line yields an empty span.
+		end := target
+		if end < len(e.text) && e.text[end] != '\n' {
+			end++
 		}
 		return e.cursor, end, true
 	case '%':
@@ -1047,8 +1053,19 @@ func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 				}
 			}
 		}
-		if (m == 'l' || m == ' ') && target == start && start < len(e.text) && e.text[start] != '\n' {
-			return start, e.nextGrapheme(start), true
+		if m == 'l' || m == ' ' {
+			// nvim's nv_right: when the line end cuts the count short the
+			// motion becomes inclusive, so the last character is taken too.
+			_, le, _, _ := e.lineAt(start)
+			p := start
+			for range count {
+				next := e.nextGrapheme(p)
+				if next >= le {
+					return start, le, true
+				}
+				p = next
+			}
+			return start, p, true
 		}
 		return start, target, true
 	}
@@ -1057,6 +1074,166 @@ func (e *Editor) rangeFor(m rune, count int) (int, int, bool) {
 		end = len(e.text)
 	}
 	return start, end, true
+}
+
+// spanKind says how an operator runs over a resolved span.
+type spanKind int
+
+const (
+	spanCharwise spanKind = iota
+	// spanLinewise is nvim's exclusive-motion rule (do_pending_operator):
+	// the cursor lands on the first non-blank after a delete.
+	spanLinewise
+	// spanLinewiseDelete is nvim's op_delete rule: the cursor keeps its
+	// column after the delete.
+	spanLinewiseDelete
+)
+
+// firstNonBlank returns the offset of the first non-blank character on the
+// line holding p, or the line's end when the line is blank.
+func (e *Editor) firstNonBlank(p int) int {
+	ls, le, _, _ := e.lineAt(p)
+	for ls < le && isSpaceNotNL(e.text[ls]) {
+		ls++
+	}
+	return ls
+}
+
+// adjustExclusive applies nvim's rule for an exclusive span [start,end) that
+// ends in column 0 of a later line. When start is at or before the first
+// non-blank of its line the span covers whole lines; otherwise the end moves
+// back onto the previous line's break so that break survives.
+func (e *Editor) adjustExclusive(start, end int) (int, int, bool) {
+	if end <= start || end > len(e.text) || e.text[end-1] != '\n' {
+		return start, end, false
+	}
+	if start <= e.firstNonBlank(start) {
+		ls, _, _, _ := e.lineAt(start)
+		return ls, end, true
+	}
+	return start, end - 1, false
+}
+
+// deleteBecomesLinewise reports nvim's op_delete rule: a charwise delete that
+// spans more than one line, leaves only blanks on the rest of its last line,
+// and starts inside its line's indent runs linewise instead.
+func (e *Editor) deleteBecomesLinewise(start, end int) bool {
+	if end <= start || end > len(e.text) {
+		return false
+	}
+	multiline := false
+	for i := start; i < end; i++ {
+		if e.text[i] == '\n' {
+			multiline = true
+			break
+		}
+	}
+	if !multiline {
+		return false
+	}
+	for i := end; i < len(e.text) && e.text[i] != '\n'; i++ {
+		if !isSpaceNotNL(e.text[i]) {
+			return false
+		}
+	}
+	return start <= e.firstNonBlank(start)
+}
+
+// adjustSpan resolves how op runs over the span motion m produced.
+func (e *Editor) adjustSpan(op, m rune, start, end int) (int, int, spanKind) {
+	switch m {
+	case '(', ')', '{', '}', 'b', 'B':
+		var linewise bool
+		start, end, linewise = e.adjustExclusive(start, end)
+		if linewise {
+			return start, end, spanLinewise
+		}
+	}
+	if op == 'd' && e.deleteBecomesLinewise(start, end) {
+		return start, end, spanLinewiseDelete
+	}
+	return start, end, spanCharwise
+}
+
+// operateLinewiseSpan runs op over the whole lines covered by [start,end).
+// For spanLinewise, end sits in column 0 of the line after the last one and
+// a delete lands the cursor on the first non-blank. For spanLinewiseDelete,
+// end lies on the last line itself and a delete keeps the cursor column. A
+// change keeps the indent and the line break and leaves the cursor where the
+// insert begins.
+func (e *Editor) operateLinewiseSpan(op rune, start, end int, kind spanKind) {
+	ls, _, _, _ := e.lineAt(start)
+	last := end
+	if kind == spanLinewise && last > ls {
+		last--
+	}
+	_, contentEnd, _, _ := e.lineAt(last)
+	if contentEnd < ls {
+		contentEnd = ls
+	}
+	reg := append(append([]rune(nil), e.text[ls:contentEnd]...), '\n')
+	switch op {
+	case 'y':
+		e.reg = reg
+		e.regLinewise = true
+		e.cursor = start
+	case 'd':
+		column := e.cursorColumn(e.cursor)
+		delStart, delEnd := ls, contentEnd
+		if contentEnd < len(e.text) {
+			delEnd = contentEnd + 1
+		} else if ls > 0 {
+			// The last line goes with the previous line's break.
+			delStart = ls - 1
+		}
+		e.deleteRange(delStart, delEnd)
+		e.reg = reg
+		e.regLinewise = true
+		if kind == spanLinewiseDelete {
+			e.placeAtColumn(delStart, column)
+		} else {
+			at := delStart
+			if at >= len(e.text) && len(e.text) > 0 && e.text[len(e.text)-1] != '\n' {
+				at = len(e.text) - 1
+			}
+			e.cursor = e.firstNonBlank(at)
+			e.normalCursorClamp()
+		}
+		e.setLastUndoRedoCursor(e.cursor)
+	case 'c':
+		insertAt := e.firstNonBlank(ls)
+		if insertAt > contentEnd {
+			insertAt = contentEnd
+		}
+		if insertAt < contentEnd {
+			e.deleteRange(insertAt, contentEnd)
+		} else {
+			e.pushUndo()
+		}
+		e.reg = reg
+		e.regLinewise = true
+		e.cursor = insertAt
+	}
+}
+
+// deleteMotion runs d over motion m, as the first time and on '.' replay.
+func (e *Editor) deleteMotion(m rune, count int) {
+	start, end, ok := e.rangeFor(m, count)
+	if !ok {
+		return
+	}
+	start, end, kind := e.adjustSpan('d', m, start, end)
+	switch kind {
+	case spanLinewise:
+		e.operateLinewiseSpan('d', start, end, spanLinewise)
+	case spanLinewiseDelete:
+		e.operateLinewiseSpan('d', start, end, spanLinewiseDelete)
+	default:
+		e.cursor = start
+		e.deleteRange(start, end)
+		e.normalCursorClamp()
+		e.setLastUndoRedoCursor(e.cursor)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1162,7 +1339,7 @@ func (e *Editor) beginChange(m rune, count int) {
 	// logical Vim change and must be retained while later per-rune snapshots are
 	// folded into it.
 	switch m {
-	case 'C', 'L', 'S', 's', 'O', 'o', 'V', 'F', 'g', '$', 'w', 'W', 'e', 'E', 'f', 't', 'T', 'b', 'B', '0', '^', 'h', 'l', ' ', '%', '{', '}':
+	case 'C', 'L', 'S', 's', 'O', 'o', 'V', 'F', 'g', '$', 'w', 'W', 'e', 'E', 'f', 't', 'T', 'b', 'B', '0', '^', 'h', 'l', ' ', '%', '{', '}', '(', ')':
 		if e.changeUndoAt > 0 {
 			e.changeUndoAt--
 		}
@@ -1308,6 +1485,14 @@ func (e *Editor) endChange() {
 			ed.insertRunes(ins)
 		case 'O': // text object repeat
 			if s, en, ok := ed.textObjectSpan(around, obj, repeatCount); ok {
+				if obj == 's' {
+					var linewise bool
+					if s, en, linewise = ed.adjustExclusive(s, en); linewise {
+						ed.operateLinewiseSpan('c', s, en, spanLinewise)
+						ed.insertRunes(ins)
+						break
+					}
+				}
 				var lineReg []rune
 				if obj == 'p' {
 					lineReg = paragraphRegister(ed.text[s:en], around, en == len(ed.text))
@@ -1375,19 +1560,30 @@ func (e *Editor) endChange() {
 			ed.insertRunes(ins)
 		default:
 			if changeSpan != nil {
-				s, en, ok := changeSpan(ed, repeatCount)
+				s, en, linewise, ok := changeSpan(ed, repeatCount)
 				if !ok {
 					return
 				}
-				ed.deleteRange(s, en)
+				if linewise {
+					ed.operateLinewiseSpan('c', s, en, spanLinewise)
+				} else {
+					ed.deleteRange(s, en)
+				}
 				ed.insertRunes(ins)
 			} else if s, en, ok := ed.rangeFor(kind, repeatCount); ok {
-				ed.deleteRange(s, en)
+				s, en, spanK := ed.adjustSpan('c', kind, s, en)
+				if spanK != spanCharwise {
+					ed.operateLinewiseSpan('c', s, en, spanLinewise)
+				} else {
+					ed.deleteRange(s, en)
+				}
 				ed.insertRunes(ins)
 			}
 		}
-		if ed.cursor > 0 && !(len(ins) == 0 && (kind == 'o' || kind == 'V')) {
-			ed.cursor--
+		// Leaving insert moves one character left unless the cursor sits in
+		// column 0 (nvim ins_esc).
+		if ls, _, _, _ := ed.lineAt(ed.cursor); ed.cursor > ls && !(len(ins) == 0 && (kind == 'o' || kind == 'V')) {
+			ed.cursor = ed.prevGrapheme(ed.cursor)
 		}
 		ed.normalCursorClamp()
 	}
@@ -1475,12 +1671,46 @@ func (e *Editor) markTarget(kind, r rune) (int, bool) {
 // operateMotionSpan applies op over the span a cursor-relative motion resolves
 // to and records exact '.' replay for the delete and change forms.
 func (e *Editor) operateMotionSpan(op rune, count int, span func(*Editor, int) (int, int, bool)) {
-	s, en, ok := span(e, count)
-	if !ok {
-		return
+	// These motions are exclusive, so nvim's column-0 and op_delete rules
+	// decide between a charwise and a linewise operation.
+	resolve := func(ed *Editor, op rune, count int) (raw, s, en int, kind spanKind, ok bool) {
+		s, en, ok = span(ed, count)
+		if !ok {
+			return 0, 0, 0, spanCharwise, false
+		}
+		raw = s
+		var linewise bool
+		s, en, linewise = ed.adjustExclusive(s, en)
+		if linewise {
+			return raw, s, en, spanLinewise, true
+		}
+		if op == 'd' && ed.deleteBecomesLinewise(s, en) {
+			return raw, s, en, spanLinewiseDelete, true
+		}
+		return raw, s, en, spanCharwise, true
 	}
-	if s != en {
-		e.operateSpan(op, s, en)
+	apply := func(ed *Editor, op rune, count int) bool {
+		rawStart, s, en, kind, ok := resolve(ed, op, count)
+		if !ok {
+			return false
+		}
+		switch kind {
+		case spanLinewise:
+			ed.operateLinewiseSpan(op, s, en, spanLinewise)
+			if op == 'y' {
+				ed.cursor = rawStart
+			}
+		case spanLinewiseDelete:
+			ed.operateLinewiseSpan(op, s, en, spanLinewiseDelete)
+		default:
+			if s != en {
+				ed.operateSpan(op, s, en)
+			}
+		}
+		return true
+	}
+	if !apply(e, op, count) {
+		return
 	}
 	switch op {
 	case 'd':
@@ -1490,15 +1720,14 @@ func (e *Editor) operateMotionSpan(op rune, count int, span func(*Editor, int) (
 			if ed.dotCount > 0 {
 				repeat = ed.dotCount
 			}
-			s, en, ok := span(ed, repeat)
-			if !ok || s == en {
-				return
-			}
-			ed.operateSpan('d', s, en)
+			apply(ed, 'd', repeat)
 		}
 	case 'c':
 		e.beginChange('0', count)
-		e.changeSpan = span
+		e.changeSpan = func(ed *Editor, count int) (int, int, bool, bool) {
+			_, s, en, kind, ok := resolve(ed, 'c', count)
+			return s, en, kind != spanCharwise, ok
+		}
 		e.mode = ModeInsert
 	}
 }
@@ -1577,6 +1806,39 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 			e.normalCursorClamp()
 		}
 		return
+	}
+	if obj == 's' {
+		// The sentence object ends like an exclusive motion, so nvim's
+		// column-0 rule and op_delete's linewise rule apply to it.
+		rawStart := s
+		var linewise bool
+		s, en, linewise = e.adjustExclusive(s, en)
+		kind := spanCharwise
+		if linewise {
+			kind = spanLinewise
+		} else if op == 'd' && e.deleteBecomesLinewise(s, en) {
+			kind = spanLinewiseDelete
+		}
+		if kind != spanCharwise {
+			switch op {
+			case 'y':
+				e.operateLinewiseSpan('y', s, en, spanLinewise)
+				e.cursor = rawStart
+			case 'd':
+				e.operateLinewiseSpan('d', s, en, kind)
+				ar, ob, cc := around, obj, count
+				e.lastEdit = func(ed *Editor) {
+					ed.operateTextObject('d', ar, ob, cc)
+				}
+			case 'c':
+				e.operateLinewiseSpan('c', s, en, spanLinewise)
+				e.beginChange('O', count)
+				e.changeObj = obj
+				e.changeAround = around
+				e.mode = ModeInsert
+			}
+			return
+		}
 	}
 	paragraphUndoCursor := 0
 	if obj == 'p' {
@@ -1826,11 +2088,17 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.placeAtColumn(ds, column)
 			d := delta
 			e.lastEdit = func(ed *Editor) {
-				_, _, a, b, ok := ed.lineSpanDelta(ed.cursor, d)
+				cs, ce, a, b, ok := ed.lineSpanDelta(ed.cursor, d)
 				if !ok {
 					return
 				}
+				// The column comes from the cursor at repeat time, not from
+				// the first delete.
+				column := ed.cursorColumn(ed.cursor)
+				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
+				ed.reg = lineReg
+				ed.regLinewise = true
 				ed.placeAtColumn(a, column)
 			}
 		case 'c':
@@ -1870,8 +2138,12 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.lastEdit = func(ed *Editor) {
 				ls := ed.lineBounds()
 				cl := ed.lineIndexAt(ls, ed.cursor)
-				_, _, a, b, _ := ed.lineSpanDelta(ed.cursor, (len(ls)-1)-cl)
+				cs, ce, a, b, _ := ed.lineSpanDelta(ed.cursor, (len(ls)-1)-cl)
+				column := ed.cursorColumn(ed.cursor)
+				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
+				ed.reg = lineReg
+				ed.regLinewise = true
 				ed.placeAtColumn(a, column)
 			}
 		case 'c':
@@ -1935,11 +2207,17 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.placeAtColumn(ds, column)
 			d := delta
 			e.lastEdit = func(ed *Editor) {
-				_, _, a, b, ok := ed.lineSpanDelta(ed.cursor, d)
+				cs, ce, a, b, ok := ed.lineSpanDelta(ed.cursor, d)
 				if !ok {
 					return
 				}
+				// The column comes from the cursor at repeat time, not from
+				// the first delete.
+				column := ed.cursorColumn(ed.cursor)
+				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
+				ed.reg = lineReg
+				ed.regLinewise = true
 				ed.placeAtColumn(a, column)
 			}
 		case 'c':
@@ -1984,55 +2262,29 @@ func (e *Editor) operate(op, m rune, count int) {
 	if !ok {
 		return
 	}
-	beforeLen := len(e.text)
-	paragraphLinewise := false
-	paragraphBlank := false
-	if originalMotion == '}' {
-		ls, le, _, _ := e.lineAt(start)
-		paragraphBlank = isBlankLine(e.text, ls, le)
-		paragraphLinewise = start == ls || paragraphBlank
-	}
+	rawStart := start
+	start, end, kind := e.adjustSpan(op, originalMotion, start, end)
 	switch op {
 	case 'y':
+		if kind != spanCharwise {
+			e.operateLinewiseSpan('y', start, end, spanLinewise)
+			e.cursor = rawStart
+			return
+		}
 		e.reg = append([]rune(nil), e.text[start:end]...)
 		e.cursor = start
 	case 'd':
-		registerStart := start
-		deleteStart := start
-		beforeText := append([]rune(nil), e.text...)
-		if originalMotion == '}' {
-			ls, le, _, _ := e.lineAt(start)
-			if isBlankLine(e.text, ls, le) && start == ls && start > 0 {
-				deleteStart--
-			}
+		switch kind {
+		case spanLinewise:
+			e.operateLinewiseSpan('d', start, end, spanLinewise)
+		case spanLinewiseDelete:
+			e.operateLinewiseSpan('d', start, end, spanLinewiseDelete)
+		default:
+			e.cursor = start
+			e.deleteRange(start, end)
+			e.normalCursorClamp()
+			e.setLastUndoRedoCursor(e.cursor)
 		}
-		wordLinewise := false
-		if (originalMotion == 'w' || originalMotion == 'W') && count > 1 && end == beforeLen {
-			ls, _, _, _ := e.lineAt(start)
-			wordLinewise = start == ls
-			if wordLinewise && start > 0 {
-				deleteStart--
-			}
-		}
-		e.cursor = deleteStart
-		e.deleteRange(deleteStart, end)
-		if registerStart != deleteStart && registerStart < end {
-			e.reg = append([]rune(nil), beforeText[registerStart:end]...)
-		}
-		if wordLinewise && (len(e.reg) == 0 || e.reg[len(e.reg)-1] != '\n') {
-			e.reg = append(e.reg, '\n')
-			e.regLinewise = true
-		}
-		if originalMotion == '}' && end == beforeLen && paragraphLinewise && (start == 0 || paragraphBlank) {
-			// Paragraph-to-EOF is linewise in Vim even when the buffer has no
-			// physical trailing newline.
-			if len(e.reg) == 0 || e.reg[len(e.reg)-1] != '\n' {
-				e.reg = append(e.reg, '\n')
-			}
-			e.regLinewise = true
-		}
-		e.normalCursorClamp()
-		e.setLastUndoRedoCursor(e.cursor)
 		mc := m
 		cc := count
 		e.lastEdit = func(ed *Editor) {
@@ -2040,10 +2292,7 @@ func (e *Editor) operate(op, m rune, count int) {
 			if ed.dotCount > 0 {
 				repeat = ed.dotCount
 			}
-			if s, en, ok := ed.rangeFor(mc, repeat); ok {
-				ed.deleteRange(s, en)
-				ed.normalCursorClamp()
-			}
+			ed.deleteMotion(mc, repeat)
 		}
 	case 'c':
 		if count == 1 && (originalMotion == 'w' || originalMotion == 'W') && start < len(e.text) && e.text[start] == '\n' {
@@ -2054,7 +2303,11 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.mode = ModeInsert
 			return
 		}
-		e.deleteRange(start, end)
+		if kind != spanCharwise {
+			e.operateLinewiseSpan('c', start, end, spanLinewise)
+		} else {
+			e.deleteRange(start, end)
+		}
 		e.beginChange(originalMotion, count)
 		e.mode = ModeInsert
 	}
@@ -2372,7 +2625,8 @@ func (e *Editor) Feed(key string) Action {
 					if p < ed.cursor {
 						return p, ed.cursor, true
 					}
-					return ed.cursor, p + 1, true
+					// Unmatched-bracket motions are exclusive both ways.
+					return ed.cursor, p, true
 				})
 			}
 		}
@@ -2569,12 +2823,12 @@ func (e *Editor) feedInsert(key string) Action {
 	switch key {
 	case "esc":
 		e.pendingJ = false
-		insertStart := e.changeFrom
 		e.applyInsertCount()
 		e.endChange()
 		e.mode = ModeNormal
-		if e.cursor > 0 && e.cursor > insertStart {
-			e.cursor--
+		// nvim ins_esc: move one character left unless in column 0.
+		if ls, _, _, _ := e.lineAt(e.cursor); e.cursor > ls {
+			e.cursor = e.prevGrapheme(e.cursor)
 		}
 		e.pending = 0
 		e.normalCursorClamp()

@@ -265,8 +265,12 @@ func (e *Editor) paragraphMove(p int, dir int, count int) int {
 				for i >= 0 && !isMotionBlank(i) {
 					i--
 				}
-				if i+1 < cur {
-					target = lines[i+1][0]
+				// Land on the blank line before the previous paragraph, or on
+				// the buffer start when there is none.
+				if i >= 0 {
+					target = lines[i][0]
+				} else if target != 0 {
+					target = 0
 				} else {
 					return p
 				}
@@ -574,7 +578,9 @@ func (e *Editor) textObjectSentence(around bool, count int) (int, int, bool) {
 		return 0, 0, false
 	}
 	p := e.cursor
-	if p >= len(e.text) {
+	// A cursor on the empty last line (text ending in a break) stays there;
+	// only a cursor past a final character is pulled back onto it.
+	if p >= len(e.text) && e.text[len(e.text)-1] != '\n' {
 		p = len(e.text) - 1
 	}
 	ns, _ := e.sentenceFind(p, true, 1)
@@ -619,9 +625,19 @@ func (e *Editor) textObjectSentence(around bool, count int) (int, int, bool) {
 			start = e.sentenceFirstBlank(start)
 		}
 	}
-	end := cursor + 1
-	if ne, ok := sentenceIncl(e.text, cursor); ok && ne > end {
-		end = ne
+	// current_sent: the span is inclusive only when incl fails at the buffer
+	// end. do_pending_operator then orders the two positions, which matters
+	// for a sentence made only of end punctuation.
+	endPos, inclusive := cursor, true
+	if ne, ok := sentenceIncl(e.text, cursor); ok {
+		endPos, inclusive = ne, false
+	}
+	if endPos < start {
+		start, endPos = endPos, start
+	}
+	end := endPos
+	if inclusive {
+		end++
 	}
 	if end > len(e.text) {
 		end = len(e.text)

@@ -386,6 +386,381 @@ func TestV031OracleRegressions(t *testing.T) {
 			text: "one\ntwo\nthree", cursor: 0,
 			keys: "2dd.", wantText: "three", wantPos: 0,
 		},
+		{
+			name: "append esc moves left",
+			text: "abcd", cursor: 1,
+			keys: "a<esc>x", wantText: "acd", wantPos: 1,
+		},
+		{
+			name: "insert esc moves left",
+			text: "abcd", cursor: 2,
+			keys: "i<esc>", wantText: "abcd", wantPos: 1,
+		},
+		{
+			name: "replace esc moves left",
+			text: "abcd", cursor: 2,
+			keys: "R<esc>", wantText: "abcd", wantPos: 1,
+		},
+		{
+			name: "substitute esc moves left",
+			text: "abcd", cursor: 2,
+			keys: "s<esc>", wantText: "abd", wantPos: 1,
+		},
+		{
+			name: "counted insert esc moves left",
+			text: "abcd", cursor: 2,
+			keys: "3i<esc>", wantText: "abcd", wantPos: 1,
+		},
+		{
+			name: "dot replay esc stays in column 0",
+			text: "ab\ncd\nef", cursor: 3,
+			keys: "s<esc>+.", wantText: "ab\nd\nf", wantPos: 5,
+		},
+		{
+			name: "open below esc stays in column 0",
+			text: "one\ntwo", cursor: 0,
+			keys: "o<esc>", wantText: "one\n\ntwo", wantPos: 4,
+		},
+		{
+			name: "d2l at line end",
+			text: "abc", cursor: 1,
+			keys: "d2l", wantText: "a", wantPos: 0,
+		},
+		{
+			name: "c2l at line end",
+			text: "abc", cursor: 1,
+			keys: "c2lQ<esc>", wantText: "aQ", wantPos: 1,
+		},
+		{
+			name: "c3l at line end",
+			text: "abcd", cursor: 2,
+			keys: "c3lQ<esc>", wantText: "abQ", wantPos: 2,
+		},
+		{
+			name: "dot repeat d2l",
+			text: "abc", cursor: 1,
+			keys: "d2l.", wantText: "", wantPos: 0,
+		},
+		{
+			name: "d2w single line stays charwise",
+			text: "cd ef", cursor: 0,
+			keys: "d2wp", wantText: "cd ef", wantPos: 4,
+		},
+		{
+			name: "d2w last line keeps break",
+			text: "ab\ncd ef", cursor: 3,
+			keys: "d2w", wantText: "ab\n", wantPos: 3,
+		},
+		{
+			name: "d3w across lines is linewise",
+			text: "ab\ncd\nef gh", cursor: 3,
+			keys: "d3w", wantText: "ab", wantPos: 0,
+		},
+		{
+			name: "d3w linewise keeps column",
+			text: "abcdef\n  cd\nef gh", cursor: 9,
+			keys: "d3w", wantText: "abcdef", wantPos: 2,
+		},
+		{
+			name: "D on empty line",
+			text: "a\n\nb", cursor: 2,
+			keys: "D", wantText: "a\n\nb", wantPos: 2,
+		},
+		{
+			name: "C on empty line",
+			text: "a\n\nb", cursor: 2,
+			keys: "CQ<esc>", wantText: "a\nQ\nb", wantPos: 2,
+		},
+		{
+			name: "dot repeat D on empty line",
+			text: "a\n\nb\n\nc", cursor: 2,
+			keys: "D.", wantText: "a\n\nb\n\nc", wantPos: 2,
+		},
+		{
+			name: "d2 dollar onto empty line",
+			text: "ab\n\nb", cursor: 0,
+			keys: "d2$", wantText: "b", wantPos: 0,
+		},
+		{
+			name: "d2 dollar to buffer end is linewise",
+			text: "a\nb\nc", cursor: 2,
+			keys: "d2$", wantText: "a", wantPos: 0,
+		},
+		{
+			name: "dis keeps break at column 0",
+			text: "Hello there. How are you?\nNext line.", cursor: 15,
+			keys: "dis", wantText: "Hello there. \nNext line.", wantPos: 12,
+		},
+		{
+			name: "cis keeps break at column 0",
+			text: "Hello there. How are you?\nNext line.", cursor: 15,
+			keys: "cisQ<esc>", wantText: "Hello there. Q\nNext line.", wantPos: 13,
+		},
+		{
+			name: "das keeps break at column 0",
+			text: "Hello there. How are you?\nNext line.", cursor: 15,
+			keys: "das", wantText: "Hello there.\nNext line.", wantPos: 11,
+		},
+		{
+			name: "d rparen keeps break at column 0",
+			text: "xx One two.\n\nThree.", cursor: 3,
+			keys: "d)", wantText: "xx \n\nThree.", wantPos: 2,
+		},
+		{
+			name: "c rparen from line start is linewise",
+			text: "One.\nTwo.", cursor: 0,
+			keys: "c)Q<esc>", wantText: "Q\nTwo.", wantPos: 0,
+		},
+		{
+			name: "d rparen linewise register pastes lines",
+			text: "One.\nTwo.", cursor: 0,
+			keys: "d)p", wantText: "Two.\nOne.", wantPos: 5,
+		},
+		{
+			name: "d rparen from indent is linewise",
+			text: "  One.\nTwo three.", cursor: 1,
+			keys: "d)", wantText: "Two three.", wantPos: 0,
+		},
+		{
+			name: "c rparen linewise keeps indent",
+			text: "  One.\nTwo.", cursor: 1,
+			keys: "c)Q<esc>", wantText: "  Q\nTwo.", wantPos: 2,
+		},
+		{
+			name: "y rparen linewise keeps cursor",
+			text: "  One.\nTwo three.", cursor: 2,
+			keys: "y)", wantText: "  One.\nTwo three.", wantPos: 2,
+		},
+		{
+			name: "dis linewise lands on first non-blank",
+			text: "  One.\n   Two.", cursor: 2,
+			keys: "dis", wantText: "   Two.", wantPos: 3,
+		},
+		{
+			name: "c lparen from column 0 is linewise",
+			text: "One.\nTwo.", cursor: 5,
+			keys: "c(Q<esc>", wantText: "Q\nTwo.", wantPos: 0,
+		},
+		{
+			name: "dot repeat c rparen linewise",
+			text: "One.\nTwo.\nThree.", cursor: 0,
+			keys: "c)Q<esc>+.", wantText: "Q\nQ\nThree.", wantPos: 2,
+		},
+		{
+			name: "dot repeat cis linewise",
+			text: "One.\nTwo.\nThree.", cursor: 0,
+			keys: "cisQ<esc>+.", wantText: "Q\nThree.", wantPos: 0,
+		},
+		{
+			name: "search delete keeps break at column 0",
+			text: "xx One.\nTwo.", cursor: 3,
+			keys: "d/Two<enter>", wantText: "xx \nTwo.", wantPos: 2,
+		},
+		{
+			name: "search change keeps break at column 0",
+			text: "xx One.\nTwo.", cursor: 3,
+			keys: "c/Two<enter>Q<esc>", wantText: "xx Q\nTwo.", wantPos: 3,
+		},
+		{
+			name: "search change from line start is linewise",
+			text: "One.\nTwo.", cursor: 0,
+			keys: "c/Two<enter>Q<esc>", wantText: "Q\nTwo.", wantPos: 0,
+		},
+		{
+			name: "search delete linewise register",
+			text: "One.\nTwo.", cursor: 0,
+			keys: "d/Two<enter>p", wantText: "Two.\nOne.", wantPos: 5,
+		},
+		{
+			name: "dot repeat search delete at column 0",
+			text: "xx One.\nTwo.\nThree.", cursor: 3,
+			keys: "d/Two<enter>+.", wantText: "xx \nTwo.\nThree.", wantPos: 4,
+		},
+		{
+			name: "mark delete keeps break at column 0",
+			text: "xx One.\nTwo.", cursor: 0,
+			keys: "+ma-3ld`a", wantText: "xx \nTwo.", wantPos: 2,
+		},
+		{
+			name: "mark change keeps break at column 0",
+			text: "xx One.\nTwo.", cursor: 0,
+			keys: "+ma-3lc`aQ<esc>", wantText: "xx Q\nTwo.", wantPos: 3,
+		},
+		{
+			name: "mark yank keeps break at column 0",
+			text: "xx One.\nTwo.", cursor: 0,
+			keys: "+ma-3ly`aP", wantText: "xx One.One.\nTwo.", wantPos: 6,
+		},
+		{
+			name: "db from column 0 keeps break",
+			text: "xx One.\nTwo.\n\nThree.", cursor: 13,
+			keys: "db", wantText: "xx One.\nTwo\n\nThree.", wantPos: 10,
+		},
+		{
+			name: "db onto blank line is linewise",
+			text: "a\n\nb", cursor: 3,
+			keys: "db", wantText: "a\nb", wantPos: 2,
+		},
+		{
+			name: "unmatched bracket forward is exclusive",
+			text: "(a)b", cursor: 1,
+			keys: "d])", wantText: "()b", wantPos: 1,
+		},
+		{
+			name: "unmatched bracket change dot",
+			text: "(a(b)c)d", cursor: 3,
+			keys: "c])Q<esc>.", wantText: "(a(Q)c)d", wantPos: 3,
+		},
+		{
+			name: "unmatched bracket at column 0 is linewise",
+			text: "(a\n)b", cursor: 0,
+			keys: "d])", wantText: ")b", wantPos: 0,
+		},
+		{
+			name: "unmatched bracket at column 0 keeps break",
+			text: "a (b\n) c", cursor: 3,
+			keys: "d])", wantText: "a (\n) c", wantPos: 2,
+		},
+		{
+			name: "lbrace from blank lands on blank",
+			text: "a\n\nb\n\nc", cursor: 5,
+			keys: "{", wantText: "a\n\nb\n\nc", wantPos: 2,
+		},
+		{
+			name: "counted lbrace reaches start",
+			text: "a\n\nb\n\nc", cursor: 5,
+			keys: "2{", wantText: "a\n\nb\n\nc", wantPos: 0,
+		},
+		{
+			name: "d lbrace from blank",
+			text: "a\n\nb\n\nc", cursor: 5,
+			keys: "d{", wantText: "a\n\nc", wantPos: 2,
+		},
+		{
+			name: "d rbrace from blank keeps one break",
+			text: "a\n\nb\n\nc", cursor: 2,
+			keys: "d}", wantText: "a\n\nc", wantPos: 2,
+		},
+		{
+			name: "dot repeat d rbrace from blank",
+			text: "a\n\nb\n\nc\n\nd", cursor: 2,
+			keys: "d}.", wantText: "a\n\nd", wantPos: 2,
+		},
+		{
+			name: "c rbrace from blank keeps break",
+			text: "a\n\nb\n\nc", cursor: 2,
+			keys: "c}Q<esc>", wantText: "a\nQ\n\nc", wantPos: 2,
+		},
+		{
+			name: "d2 lbrace linewise",
+			text: "a\n\nb\n\nc", cursor: 6,
+			keys: "d2{", wantText: "a\nc", wantPos: 2,
+		},
+		{
+			name: "c lbrace from column 0 is linewise",
+			text: "a\n\nb\n\nc", cursor: 6,
+			keys: "c{Q<esc>", wantText: "a\n\nb\nQ\nc", wantPos: 5,
+		},
+		{
+			name: "c rbrace keeps indent",
+			text: "x\n\n  a\nb\n\nc", cursor: 4,
+			keys: "c}Q<esc>", wantText: "x\n\n  Q\n\nc", wantPos: 5,
+		},
+		{
+			name: "d rbrace from indent is linewise",
+			text: "  a\n\nb\n\n   c", cursor: 1,
+			keys: "d}", wantText: "\nb\n\n   c", wantPos: 0,
+		},
+		{
+			name: "d2 rbrace to end is linewise",
+			text: "x\n  a\n  b\n\n  c", cursor: 4,
+			keys: "d2}", wantText: "x", wantPos: 0,
+		},
+		{
+			name: "dot repeat d rbrace to end",
+			text: "x\na\nb", cursor: 2,
+			keys: "d}.", wantText: "", wantPos: 0,
+		},
+		{
+			name: "counted shift skips empty line",
+			text: "a\n\nb", cursor: 0,
+			keys: "3>>", wantText: "\ta\n\n\tb", wantPos: 0,
+		},
+		{
+			name: "shift on empty line is a no-op",
+			text: "a b\n\nc d", cursor: 4,
+			keys: ">>", wantText: "a b\n\nc d", wantPos: 4,
+		},
+		{
+			name: "dot repeat shift skips empty line",
+			text: "a\n\nb", cursor: 0,
+			keys: ">j.", wantText: "\t\ta\n\nb", wantPos: 0,
+		},
+		{
+			name: "shift count clamps at end",
+			text: "a\n \nb", cursor: 2,
+			keys: "3>>", wantText: "a\n\t \n\tb", wantPos: 2,
+		},
+		{
+			name: "counted shift on last line aborts",
+			text: "ab\ncd ef", cursor: 6,
+			keys: "3>>", wantText: "ab\ncd ef", wantPos: 6,
+		},
+		{
+			name: "shift on empty last line is a no-op",
+			text: "One.\n", cursor: 5,
+			keys: ">>", wantText: "One.\n", wantPos: 5,
+		},
+		{
+			name: "dis on empty last line",
+			text: "One.\n", cursor: 5,
+			keys: "dis", wantText: "One.\n", wantPos: 5,
+		},
+		{
+			name: "das on empty last line",
+			text: "One.\n", cursor: 5,
+			keys: "das", wantText: "One.\n", wantPos: 5,
+		},
+		{
+			name: "cis on empty last line inserts there",
+			text: "One.\n", cursor: 5,
+			keys: "cisQ<esc>", wantText: "One.\nQ", wantPos: 5,
+		},
+		{
+			name: "dis on empty last line after blank",
+			text: "One. \n", cursor: 6,
+			keys: "dis", wantText: "One.\n", wantPos: 3,
+		},
+		{
+			name: "dis on punctuation only",
+			text: "!", cursor: 0,
+			keys: "dis", wantText: "", wantPos: 0,
+		},
+		{
+			name: "cis on punctuation only",
+			text: "!", cursor: 0,
+			keys: "cisQ<esc>", wantText: "Q", wantPos: 0,
+		},
+		{
+			name: "das on punctuation only",
+			text: ".", cursor: 0,
+			keys: "das", wantText: "", wantPos: 0,
+		},
+		{
+			name: "dot repeat dd column",
+			text: "abcd\nx\nyz", cursor: 3,
+			keys: "dd.", wantText: "yz", wantPos: 0,
+		},
+		{
+			name: "dot repeat dj register pastes lines",
+			text: "abcd\nx\nyz\nw\nq", cursor: 3,
+			keys: "dj.p", wantText: "q\nyz\nw", wantPos: 2,
+		},
+		{
+			name: "dot repeat dk register",
+			text: "a\nb\nc\nd", cursor: 6,
+			keys: "dk.", wantText: "", wantPos: 0,
+		},
 	}
 
 	for _, tc := range cases {
@@ -452,6 +827,25 @@ func TestOracleRegisterContents(t *testing.T) {
 		{name: "d rparen ordinary register", text: "One two. Three four.", cursor: 0, keys: "d)", wantText: "Three four.", wantReg: "One two. "},
 		{name: "dot repeat d rparen register", text: "One two. Three four. Five six.", cursor: 0, keys: "d).", wantText: "Five six.", wantReg: "Three four. "},
 		{name: "cas dot repeat empty register", text: "One two.   ", cursor: 9, keys: "casQ<esc>.", wantText: "Q", wantReg: "One two.Q   "},
+		{name: "d2l register", text: "abc", cursor: 1, keys: "d2l", wantText: "a", wantReg: "bc"},
+		{name: "y2l register", text: "abc", cursor: 1, keys: "y2l", wantText: "abc", wantReg: "bc"},
+		{name: "d3w linewise register", text: "ab\ncd\nef gh", cursor: 3, keys: "d3w", wantText: "ab", wantReg: "cd\nef gh\n"},
+		{name: "d2w last line register", text: "ab\ncd ef", cursor: 3, keys: "d2w", wantText: "ab\n", wantReg: "cd ef"},
+		{name: "y dollar empty line register", text: "a\n\nb", cursor: 2, keys: "y$", wantText: "a\n\nb", wantReg: ""},
+		{name: "d2 dollar linewise register", text: "ab\n\nb", cursor: 0, keys: "d2$", wantText: "b", wantReg: "ab\n\n"},
+		{name: "dis column 0 register", text: "Hello there. How are you?\nNext line.", cursor: 15, keys: "dis", wantText: "Hello there. \nNext line.", wantReg: "How are you?"},
+		{name: "d rparen column 0 register", text: "xx One two.\n\nThree.", cursor: 3, keys: "d)", wantText: "xx \n\nThree.", wantReg: "One two."},
+		{name: "y rparen linewise register", text: "  One.\nTwo three.", cursor: 1, keys: "y)", wantText: "  One.\nTwo three.", wantReg: "  One.\n"},
+		{name: "search delete column 0 register", text: "xx One.\nTwo.", cursor: 3, keys: "d/Two<enter>", wantText: "xx \nTwo.", wantReg: "One."},
+		{name: "mark yank column 0 register", text: "xx One.\nTwo.", cursor: 0, keys: "+ma-3ly`a", wantText: "xx One.\nTwo.", wantReg: "One."},
+		{name: "y rbrace from indent register", text: "x\n\n  a\nb\n\nc", cursor: 4, keys: "y}", wantText: "x\n\n  a\nb\n\nc", wantReg: "  a\nb\n"},
+		{name: "dot repeat d rbrace register", text: "a\n\nb\n\nc\n\nd", cursor: 2, keys: "d}.", wantText: "a\n\nd", wantReg: "\nc\n"},
+		{name: "dot repeat dk register", text: "a\nb\nc\nd", cursor: 6, keys: "dk.", wantText: "", wantReg: "a\nb\n"},
+		{name: "dot repeat dj register", text: "abcd\nx\nyz\nw", cursor: 3, keys: "dj.", wantText: "", wantReg: "yz\nw\n"},
+		{name: "unmatched bracket exclusive register", text: "(a)b", cursor: 1, keys: "d])", wantText: "()b", wantReg: "a"},
+		{name: "d lbrace from blank register", text: "a\n\nb\n\nc", cursor: 5, keys: "d{", wantText: "a\n\nc", wantReg: "\nb\n"},
+		{name: "db column 0 register", text: "xx One.\nTwo.\n\nThree.", cursor: 13, keys: "db", wantText: "xx One.\nTwo\n\nThree.", wantReg: "."},
+		{name: "dot repeat c rparen linewise register", text: "One.\nTwo.\nThree.", cursor: 0, keys: "c)Q<esc>+.", wantText: "Q\nQ\nThree.", wantReg: "Two.\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
