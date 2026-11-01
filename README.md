@@ -6,8 +6,8 @@ machine lives here; every consumer renders.
 Three packages:
 
 - `vimline` - the editor: modal insert, normal, and replace states, motions,
-  operators with counts, one unnamed register, undo and redo, replace mode,
-  dot repeat, and the `jj` exit idiom.
+  operators with counts, text objects, search, marks, shifts, one unnamed
+  register, undo and redo, replace mode, dot repeat, and the `jj` exit idiom.
 - `vimline/duration` - the time grammar: `3h`, `2w`, `1d12h`, `tomorrow`,
   `clear`, resolving to an absolute time plus a human description.
 - `vimline/keys` - the chord layer: `Split` and `Dispatcher`, detailed below.
@@ -33,6 +33,19 @@ v := e.View("/", true)        // Label, Text, Cursor, Mode, Pending, Count
 `Feed` takes the same key names a terminal decoder produces: `enter`, `esc`,
 `bs`, `left`, `right`, `up`, `down`, `ctrl-u`, `ctrl-w`, `ctrl-k`, `ctrl-y`,
 `ctrl-r`, `ctrl-n`, `ctrl-p`, `ctrl-d`, or a single printable character.
+
+Known gap: search patterns use Go's `regexp` engine. Vim-specific pattern
+atoms are not translated, so Vim pattern syntax is not supported in v0.3.1.
+The Vim-to-RE2 translation layer and nvim differential pattern tests are
+tracked for a later release in `wiseman-tftd`.
+
+Known gaps recorded against nvim 0.12.5 (each verified live, none silently
+dropped): a counted `w`/`W` operator that ends in column 0 of a later line
+joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
+`d'a`/`y'a` with the apostrophe mark run charwise where nvim is linewise; a
+charwise put of multi-line text leaves the cursor at the end of the put where
+nvim leaves it at the start; and `>>` places the cursor in column 0 where nvim
+keeps the virtual column (tabs are one rune here).
 
 ## Binding acceptance
 
@@ -87,7 +100,7 @@ without coupling releases.
 ## Install
 
 ```
-go get github.com/RooseveltAdvisors/vimline@v0.1.0
+go get github.com/RooseveltAdvisors/vimline@v0.3.1
 ```
 
 Tagged releases only. Pin deliberately; do not float a branch head. The pinned

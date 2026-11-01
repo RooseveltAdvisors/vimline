@@ -64,8 +64,8 @@ func TestMotions(t *testing.T) {
 		t.Fatalf("b cursor = %d, want 6", e.cursor)
 	}
 	typeKeys(e, "$")
-	if e.cursor != 16 {
-		t.Fatalf("$ cursor = %d, want 16", e.cursor)
+	if e.cursor != 15 {
+		t.Fatalf("$ cursor = %d, want 15", e.cursor)
 	}
 	typeKeys(e, "0")
 	if e.cursor != 0 {

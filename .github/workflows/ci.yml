@@ -13,5 +13,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
+      - run: |
+          curl -fsSL -o "$RUNNER_TEMP/nvim.tar.gz" https://github.com/neovim/neovim/releases/download/v0.12.5/nvim-linux-x86_64.tar.gz
+          mkdir -p "$RUNNER_TEMP/nvim"
+          tar -xzf "$RUNNER_TEMP/nvim.tar.gz" -C "$RUNNER_TEMP/nvim" --strip-components=1
+          echo "$RUNNER_TEMP/nvim/bin" >> "$GITHUB_PATH"
       - run: go vet ./...
       - run: go test -count=1 ./...

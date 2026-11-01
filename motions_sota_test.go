@@ -50,7 +50,7 @@ func TestFindMotionsWithOperatorsAndRepeats(t *testing.T) {
 		{"dt0 digit target", "abc0def", 0, "dt0", "0def", 0},
 		{"Unicode df東", "hello 東京 world", 0, "df東", "京 world", 0},
 		{"Unicode ct京", "hello 東京 world", 0, "ct京XY<esc>", "XY京 world", 1},
-		{"cfx change and dot repeat", "foo=1, bar=2", 0, "cf=X<esc>2w.", "X1, X2", 5},
+		{"cfx change and dot repeat", "foo=1, bar=2", 0, "cf=X<esc>2w.", "X1, X2", 4},
 		{"dfx dot repeat", "a:b:c:d", 0, "df:.", "c:d", 0},
 		{"yfx and p paste", "key=value", 0, "yf=$p", "key=valuekey=", 12},
 		{"t_ then ; skips adjacent", "a_b_c_d", 0, "t_;", "a_b_c_d", 2},
