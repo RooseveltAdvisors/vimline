@@ -1,9 +1,9 @@
 package vimline
 
 // Package vimline is a framework-neutral vim line Editor: modal insert,
-// normal, and replace states, motions, operators with counts, one register,
-// undo and redo, and the jj exit idiom. It renders nothing; every consumer
-// paints the View it gets.
+// normal, replace, and visual states, motions, operators with counts, one
+// register, undo and redo, and the jj exit idiom. It renders nothing; every
+// consumer paints the View it gets.
 
 import (
 	"regexp"
@@ -26,6 +26,7 @@ const (
 	ModeInsert Mode = iota
 	ModeNormal
 	ModeReplace
+	ModeVisual
 )
 
 // Action is what the caller must do with a key the Editor did not keep.
@@ -118,6 +119,23 @@ type Editor struct {
 	lineUndoStart int
 
 	lastEdit func(*Editor)
+
+	// Visual mode state. cursor is the active end; visAnchor is the fixed end.
+	visualKind               VisualKind
+	visAnchor                int
+	visBlockAnchorCol        int
+	visBlockCursorCol        int
+	hasLastVisual            bool
+	lastVisualKind           VisualKind
+	lastVisualAnchor         int
+	lastVisualCursor         int
+	lastVisualBlockAnchorCol int
+	lastVisualBlockCursorCol int
+	pendingGV                bool     // bare g in Normal; next v reselects
+	visAtEOL                 bool     // charwise selection includes trailing newline
+	visBlockAtEOL            bool     // blockwise $: each line extends through its EOL
+	blockChangeCols          [][2]int // remaining lines [lineStart, col] for blockwise c
+	blockChangeFrom          int
 }
 
 func New(s string) *Editor {
@@ -1387,6 +1405,28 @@ func (e *Editor) endChange() {
 		from = to
 	}
 	ins := append([]rune(nil), e.text[from:to]...)
+	// Blockwise Visual c: replicate the typed insert onto the other lines.
+	if len(e.blockChangeCols) > 0 && len(ins) > 0 {
+		cols := append([][2]int(nil), e.blockChangeCols...)
+		e.pushUndo()
+		for _, spec := range cols {
+			lines := e.lineBounds()
+			li := spec[0]
+			col := spec[1]
+			if li < 0 || li >= len(lines) {
+				continue
+			}
+			ls, le := lines[li][0], lines[li][1]
+			at := ls + col
+			if at > le {
+				at = le
+			}
+			e.text = append(e.text[:at], append(append([]rune(nil), ins...), e.text[at:]...)...)
+		}
+		e.blockChangeCols = nil
+	} else {
+		e.blockChangeCols = nil
+	}
 	e.dotOverride = 0
 	e.lastEdit = func(ed *Editor) {
 		repeatCount := count
@@ -2576,6 +2616,11 @@ func (e *Editor) Feed(key string) Action {
 		}
 		return ActStay
 	}
+	// Visual owns its own pending find / text-object state; do not let the
+	// Normal-mode pending handlers intercept those keys.
+	if e.mode == ModeVisual {
+		return e.feedVisual(key)
+	}
 	if e.pending == 'm' || e.pending == '`' || e.pending == '\'' {
 		kind, op := e.pending, e.pendingOp
 		cnt := e.totalOpCount()
@@ -2805,6 +2850,8 @@ func (e *Editor) Feed(key string) Action {
 	switch e.mode {
 	case ModeInsert, ModeReplace:
 		return e.feedInsert(key)
+	case ModeVisual:
+		return e.feedVisual(key)
 	default:
 		return e.feedNormal(key)
 	}
@@ -2922,8 +2969,25 @@ func (e *Editor) feedInsert(key string) Action {
 }
 
 func (e *Editor) feedNormal(key string) Action {
+	if e.pendingGV {
+		e.pendingGV = false
+		if key == "v" {
+			e.reselectVisual()
+			return ActStay
+		}
+	}
+	if key == "ctrl-v" {
+		e.enterVisual(VisualBlock)
+		return ActStay
+	}
 	if r, ok := e.printable(key); ok {
 		switch r {
+		case 'v':
+			e.enterVisual(VisualChar)
+			return ActStay
+		case 'V':
+			e.enterVisual(VisualLine)
+			return ActStay
 		case 'h':
 			p, _ := e.move('h', e.takeCount())
 			e.cursor = p
@@ -3200,6 +3264,7 @@ func (e *Editor) feedNormal(key string) Action {
 			}
 			return ActStay
 		case 'g':
+			e.pendingGV = true
 			return ActFirst
 		case 'G':
 			return ActLast
@@ -3264,13 +3329,17 @@ func (e *Editor) feedNormal(key string) Action {
 // View is the framework-neutral snapshot a consumer renders. The module owns
 // the state and the semantics; the caller owns every pixel.
 type View struct {
-	Label   string
-	Text    string
-	Cursor  int
-	Mode    Mode
-	Pending rune
-	Count   int
-	Focused bool
+	Label      string
+	Text       string
+	Cursor     int
+	Mode       Mode
+	Pending    rune
+	Count      int
+	Focused    bool
+	SelActive  bool
+	SelStart   int // inclusive selection start when SelActive
+	SelEnd     int // inclusive selection end when SelActive
+	VisualKind VisualKind
 }
 
 // View returns the renderable snapshot of the Editor.
@@ -3287,13 +3356,18 @@ func (e *Editor) View(label string, focused bool) View {
 			cnt = e.opCount
 		}
 	}
+	selStart, selEnd, selActive := e.visualSelBounds()
 	return View{
-		Label:   label,
-		Text:    e.Text(),
-		Cursor:  e.cursor,
-		Mode:    e.mode,
-		Pending: pend,
-		Count:   cnt,
-		Focused: focused,
+		Label:      label,
+		Text:       e.Text(),
+		Cursor:     e.cursor,
+		Mode:       e.mode,
+		Pending:    pend,
+		Count:      cnt,
+		Focused:    focused,
+		SelActive:  selActive,
+		SelStart:   selStart,
+		SelEnd:     selEnd,
+		VisualKind: e.visualKind,
 	}
 }
