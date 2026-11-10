@@ -284,3 +284,84 @@ func TestVisualCharCrossLineDollar(t *testing.T) {
 		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
 	}
 }
+
+func TestVisualChangeUndoAtomic(t *testing.T) {
+	e := newVisualAt("one two", 4)
+	feedVisualSeq(e, "viwcX<esc>")
+	if e.Text() != "one X" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	e.Feed("u")
+	if e.Text() != "one two" {
+		t.Fatalf("after undo text = %q", e.Text())
+	}
+	if e.CanUndo() {
+		t.Fatal("visual change must be one undo step")
+	}
+}
+
+func TestVisualBlockChangeUndoAtomic(t *testing.T) {
+	e := newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>jlcX<esc>")
+	if e.Text() != "Xcd\nXgh" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	e.Feed("u")
+	if e.Text() != "abcd\nefgh" {
+		t.Fatalf("after undo text = %q", e.Text())
+	}
+	if e.CanUndo() {
+		t.Fatal("blockwise change must be one undo step")
+	}
+}
+
+func TestVisualBlockChangeRaggedLines(t *testing.T) {
+	e := newVisualAt("abcd\nefgh\nz\nijkl", 2)
+	feedVisualSeq(e, "<C-v>ljjjcXY<esc>")
+	if e.Text() != "abXY\nefXY\nz\nijXY" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Register() != "cd\ngh\n  \nkl" {
+		t.Fatalf("reg = %q", e.Register())
+	}
+}
+
+func TestVisualDollarBlankLineSpan(t *testing.T) {
+	e := newVisualAt("line1\n\nline2", 0)
+	feedVisualSeq(e, "v$d")
+	if e.Text() != "\nline2" || e.Register() != "line1\n" {
+		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualGotoCount(t *testing.T) {
+	e := newVisualAt("aaa\nbbb\nccc\nddd", 9)
+	feedVisualSeq(e, "v2ggd")
+	if e.Text() != "aaa\nbc\nddd" || e.Register() != "bb\ncc" || e.Cursor() != 5 {
+		t.Fatalf("text=%q reg=%q cursor=%d", e.Text(), e.Register(), e.Cursor())
+	}
+}
+
+func TestVisualWordEndBackCount(t *testing.T) {
+	e := newVisualAt("a b c d e", 8)
+	feedVisualSeq(e, "v3ge")
+	if e.Cursor() != 2 {
+		t.Fatalf("cursor = %d want 2", e.Cursor())
+	}
+}
+
+func TestVisualIndentRepeat(t *testing.T) {
+	e := newVisualAt("a\nb\nc\nd\ne", 0)
+	feedVisualSeq(e, "Vj>..")
+	if e.Text() != "\t\t\ta\n\t\t\tb\nc\nd\ne" {
+		t.Fatalf("text = %q", e.Text())
+	}
+}
+
+func TestVisualIndentRepeatSurvivesShrink(t *testing.T) {
+	e := newVisualAt("a\nb\nc\nd", 4)
+	feedVisualSeq(e, "Vj>VdVd.")
+	if e.Text() != "a" || e.Register() != "b\n" {
+		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
+	}
+}

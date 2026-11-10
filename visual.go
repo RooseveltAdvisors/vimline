@@ -14,6 +14,7 @@ const (
 func (e *Editor) enterVisual(kind VisualKind) {
 	e.clearPendingState()
 	e.pendingGV = false
+	e.blockChangeCols = nil
 	e.visAtEOL = false
 	e.visBlockAtEOL = false
 	e.mode = ModeVisual
@@ -115,11 +116,6 @@ func (e *Editor) visualCharSpan() (start, end int, ok bool) {
 	if a > b {
 		a, b = b, a
 	}
-	// Cursor on newline is an exclusive-past-last-char corner: the newline
-	// is included, the prior character is only included if it is the anchor.
-	if b < len(e.text) && e.text[b] == '\n' && b > a {
-		// inclusive end on newline is correct for [a,b]
-	}
 	if a >= len(e.text) {
 		a = len(e.text) - 1
 	}
@@ -151,8 +147,70 @@ func (e *Editor) visualLineSpan() (start, end, firstLine, lastLine int, ok bool)
 	return start, end, a, b, true
 }
 
-// visualBlockCells returns per-line [start, end) slices for the block selection.
-func (e *Editor) visualBlockCells() [][2]int {
+// blockCell is one line's block slice. pad marks a line that ends before the
+// block column: its text is untouched and the register records a spaces line.
+type blockCell struct {
+	line       int
+	start, end int
+	pad        bool
+}
+
+// visualBlockCols returns the normalized virtual columns of the block.
+func (e *Editor) visualBlockCols() (int, int) {
+	c1, c2 := e.visBlockAnchorCol, e.visBlockCursorCol
+	if c1 > c2 {
+		c1, c2 = c2, c1
+	}
+	return c1, c2
+}
+
+// blockCellsAt returns one cell per line in [first..last] for virtual columns
+// [c1..c2], clamped at the buffer edge.
+func (e *Editor) blockCellsAt(first, last, c1, c2 int, atEOL bool) []blockCell {
+	lines := e.lineBounds()
+	if first < 0 {
+		first = 0
+	}
+	if last >= len(lines) {
+		last = len(lines) - 1
+	}
+	if first > last {
+		return nil
+	}
+	out := make([]blockCell, 0, last-first+1)
+	for i := first; i <= last; i++ {
+		ls, le := lines[i][0], lines[i][1]
+		width := le - ls
+		if c1 > width {
+			// Line ends before the block column: nvim leaves the text alone
+			// and only the register records a spaces line.
+			if atEOL {
+				out = append(out, blockCell{line: i, start: le, end: le})
+			} else {
+				out = append(out, blockCell{line: i, start: le, end: le, pad: true})
+			}
+			continue
+		}
+		if atEOL {
+			out = append(out, blockCell{line: i, start: ls + c1, end: le})
+			continue
+		}
+		endCol := c2 + 1
+		if endCol > width {
+			endCol = width
+		}
+		if c1 >= endCol {
+			// Block column sits at EOL: empty cell, the insert lands at EOL.
+			out = append(out, blockCell{line: i, start: ls + c1, end: ls + c1})
+			continue
+		}
+		out = append(out, blockCell{line: i, start: ls + c1, end: ls + endCol})
+	}
+	return out
+}
+
+// visualBlockCells returns one cell per line of the active block selection.
+func (e *Editor) visualBlockCells() []blockCell {
 	if len(e.text) == 0 {
 		return nil
 	}
@@ -162,38 +220,27 @@ func (e *Editor) visualBlockCells() [][2]int {
 	if a > b {
 		a, b = b, a
 	}
-	c1, c2 := e.visBlockAnchorCol, e.visBlockCursorCol
-	if c1 > c2 {
-		c1, c2 = c2, c1
-	}
-	out := make([][2]int, 0, b-a+1)
-	for i := a; i <= b; i++ {
-		ls, le := lines[i][0], lines[i][1]
-		width := le - ls
-		startCol := c1
-		endCol := c2 + 1
-		if e.visBlockAtEOL {
-			endCol = width
+	c1, c2 := e.visualBlockCols()
+	return e.blockCellsAt(a, b, c1, c2, e.visBlockAtEOL)
+}
+
+// blockRegister builds the blockwise register: one line per cell, spaces for
+// pad lines.
+func blockRegister(text []rune, cells []blockCell, width int) []rune {
+	var reg []rune
+	for i, c := range cells {
+		if i > 0 {
+			reg = append(reg, '\n')
 		}
-		if startCol > width {
-			// Past EOL on this line: empty block cell (still a register line).
-			if e.visBlockAtEOL {
-				out = append(out, [2]int{le, le})
+		if c.pad {
+			for w := width; w > 0; w-- {
+				reg = append(reg, ' ')
 			}
 			continue
 		}
-		if endCol > width {
-			endCol = width
-		}
-		if startCol >= endCol {
-			if e.visBlockAtEOL {
-				out = append(out, [2]int{ls + startCol, ls + startCol})
-			}
-			continue
-		}
-		out = append(out, [2]int{ls + startCol, ls + endCol})
+		reg = append(reg, text[c.start:c.end]...)
 	}
-	return out
+	return reg
 }
 
 // visualSelBounds returns inclusive start/end for View rendering.
@@ -216,18 +263,23 @@ func (e *Editor) visualSelBounds() (start, end int, active bool) {
 		return s, s, true
 	case VisualBlock:
 		cells := e.visualBlockCells()
-		if len(cells) == 0 {
+		start, end = 0, 0
+		found := false
+		for _, c := range cells {
+			if c.pad || c.start >= c.end {
+				continue
+			}
+			if !found || c.start < start {
+				start = c.start
+			}
+			if !found || c.end-1 > end {
+				end = c.end - 1
+			}
+			found = true
+		}
+		if !found {
 			a := e.clampPos(e.cursor)
 			return a, a, true
-		}
-		start, end = cells[0][0], cells[0][1]-1
-		for _, c := range cells[1:] {
-			if c[0] < start {
-				start = c[0]
-			}
-			if c[1]-1 > end {
-				end = c[1] - 1
-			}
 		}
 		return start, end, true
 	default:
@@ -423,7 +475,7 @@ func (e *Editor) operateVisual(op rune) {
 func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 	switch kind {
 	case VisualLine:
-		start, end, _, _, ok := e.visualLineSpan()
+		start, end, first, last, ok := e.visualLineSpan()
 		if !ok {
 			e.exitVisual(false)
 			return
@@ -441,65 +493,108 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 			// nvim keeps curswant onto the line that lands under the cursor.
 			e.placeAtColumn(e.cursor, col)
 			e.normalCursorClamp()
+			n := last - first + 1
+			e.lastEdit = func(ed *Editor) {
+				repeat := n
+				if ed.dotCount > 0 {
+					repeat = ed.dotCount
+				}
+				lines := ed.lineBounds()
+				li := ed.lineIndexAt(lines, ed.cursor)
+				to := li + repeat - 1
+				if to >= len(lines) {
+					to = len(lines) - 1
+				}
+				end := len(ed.text)
+				if to+1 < len(lines) {
+					end = lines[to+1][0]
+				}
+				column := ed.cursorColumn(ed.cursor)
+				ed.operateLinewiseSpan('d', lines[li][0], end, spanLinewise)
+				ed.placeAtColumn(ed.cursor, column)
+				ed.normalCursorClamp()
+			}
 		}
 		if op == 'c' {
-			e.beginChange('c', 1)
+			e.beginChange('L', last-first+1)
 			e.mode = ModeInsert
 		}
 	case VisualBlock:
 		cells := e.visualBlockCells()
 		e.mode = ModeNormal
-		if len(cells) == 0 {
+		c1, c2 := e.visualBlockCols()
+		width := c2 - c1 + 1
+		first := -1
+		for i, c := range cells {
+			if !c.pad {
+				first = i
+				break
+			}
+		}
+		if first < 0 {
 			e.normalCursorClamp()
 			return
 		}
 		// Build register as lines joined by newline (nvim blockwise).
-		var reg []rune
-		for i, c := range cells {
-			if i > 0 {
-				reg = append(reg, '\n')
-			}
-			reg = append(reg, e.text[c[0]:c[1]]...)
-		}
+		reg := blockRegister(e.text, cells, width)
 		if op == 'y' {
 			e.reg = reg
 			e.regLinewise = false
-			e.cursor = cells[0][0]
+			e.cursor = cells[first].start
 			e.normalCursorClamp()
 			return
 		}
-		insertCol := e.cursorColumn(cells[0][0])
 		e.pushUndo()
 		// Delete bottom-up so offsets stay valid.
 		for i := len(cells) - 1; i >= 0; i-- {
 			c := cells[i]
-			e.text = append(e.text[:c[0]], e.text[c[1]:]...)
+			e.text = append(e.text[:c.start], e.text[c.end:]...)
 		}
 		e.reg = reg
 		e.regLinewise = false
-		e.cursor = cells[0][0]
+		e.cursor = cells[first].start
 		if e.cursor > len(e.text) {
 			e.cursor = len(e.text)
 		}
 		if op == 'c' {
 			// After delete, remember other lines' insert columns for blockwise
 			// change replication when insert ends.
-			e.blockChangeCols = nil
-			lines := e.lineBounds()
-			firstLine := e.lineIndexAt(lines, e.cursor)
-			for i := 1; i < len(cells); i++ {
-				li := firstLine + i
-				if li >= len(lines) {
-					break
+			e.beginChange('c', len(cells))
+			e.changeBlockSpan = [2]int{c1, width}
+			for i := first + 1; i < len(cells); i++ {
+				c := cells[i]
+				if c.pad {
+					continue
 				}
-				e.blockChangeCols = append(e.blockChangeCols, [2]int{li, insertCol})
+				e.blockChangeCols = append(e.blockChangeCols, [2]int{c.line, c1})
 			}
-			e.blockChangeFrom = e.cursor
-			e.beginChange('c', 1)
 			e.mode = ModeInsert
 		} else {
 			e.normalCursorClamp()
 			e.setLastUndoRedoCursor(e.cursor)
+			rows := len(cells)
+			e.lastEdit = func(ed *Editor) {
+				repeat := rows
+				if ed.dotCount > 0 {
+					repeat = ed.dotCount
+				}
+				lines := ed.lineBounds()
+				li := ed.lineIndexAt(lines, ed.cursor)
+				blk := ed.blockCellsAt(li, li+repeat-1, c1, c2, false)
+				ed.reg = blockRegister(ed.text, blk, width)
+				ed.regLinewise = false
+				for i := len(blk) - 1; i >= 0; i-- {
+					c := blk[i]
+					ed.text = append(ed.text[:c.start], ed.text[c.end:]...)
+				}
+				for _, c := range blk {
+					if !c.pad {
+						ed.cursor = c.start
+						break
+					}
+				}
+				ed.normalCursorClamp()
+			}
 		}
 	default:
 		s, en, ok := e.visualCharSpan()
@@ -510,9 +605,6 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 		end := en + 1
 		if end > len(e.text) {
 			end = len(e.text)
-		}
-		if e.visAtEOL && end < len(e.text) && e.text[end] == '\n' {
-			end++
 		}
 		e.visAtEOL = false
 		e.mode = ModeNormal
@@ -526,7 +618,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 		e.cursor = s
 		e.deleteRange(s, end)
 		if op == 'c' {
-			e.beginChange('c', 1)
+			e.beginChange('c', end-s)
 			e.mode = ModeInsert
 		} else {
 			e.normalCursorClamp()
@@ -558,68 +650,13 @@ func (e *Editor) operateVisualIndent(op rune) {
 		return
 	}
 	lines := e.lineBounds()
-	e.pushUndo()
-	for line := last; line >= first; line-- {
-		start := lines[line][0]
-		switch op {
-		case '>':
-			if start < len(e.text) && e.text[start] != '\n' {
-				e.text = append(e.text[:start], append([]rune{'\t'}, e.text[start:]...)...)
-			}
-		case '<':
-			if start < len(e.text) && e.text[start] == '\t' {
-				e.text = append(e.text[:start], e.text[start+1:]...)
-			} else {
-				end := start
-				for end < len(e.text) && end < start+8 && e.text[end] == ' ' {
-					end++
-				}
-				e.text = append(e.text[:start], e.text[end:]...)
-			}
-		case '=':
-			end := start
-			for end < len(e.text) && isSpaceNotNL(e.text[end]) {
-				end++
-			}
-			e.text = append(e.text[:start], e.text[end:]...)
-		}
-	}
-	lines = e.lineBounds()
 	e.cursor = lines[first][0]
+	e.operateIndent(op, op, last-first+1)
 	if op == '=' {
+		lines = e.lineBounds()
 		e.cursor = e.firstNonBlank(lines[first][0])
 	}
-	if op == '<' && lines[first][1] > lines[first][0] {
-		e.cursor = lines[first][1] - 1
-	}
 	e.normalCursorClamp()
-	oo := op
-	ff, ll := first, last
-	e.lastEdit = func(ed *Editor) {
-		ed.pushUndo()
-		ls := ed.lineBounds()
-		for line := ll; line >= ff && line < len(ls); line-- {
-			start := ls[line][0]
-			switch oo {
-			case '>':
-				if start < len(ed.text) && ed.text[start] != '\n' {
-					ed.text = append(ed.text[:start], append([]rune{'\t'}, ed.text[start:]...)...)
-				}
-			case '<':
-				if start < len(ed.text) && ed.text[start] == '\t' {
-					ed.text = append(ed.text[:start], ed.text[start+1:]...)
-				}
-			case '=':
-				end := start
-				for end < len(ed.text) && isSpaceNotNL(ed.text[end]) {
-					end++
-				}
-				ed.text = append(ed.text[:start], ed.text[end:]...)
-			}
-		}
-		ed.cursor = ed.lineBounds()[ff][0]
-		ed.normalCursorClamp()
-	}
 }
 
 // operateVisualCase applies case transform over the visual selection.
@@ -630,19 +667,53 @@ func (e *Editor) operateVisualCase(dir int) {
 	e.pushUndo()
 	switch kind {
 	case VisualLine:
-		start, end, _, _, ok := e.visualLineSpan()
+		start, end, first, last, ok := e.visualLineSpan()
 		if !ok {
 			return
 		}
 		e.applyCaseRange(start, end, dir)
 		e.cursor = start
+		n := last - first + 1
+		e.lastEdit = func(ed *Editor) {
+			repeat := n
+			if ed.dotCount > 0 {
+				repeat = ed.dotCount
+			}
+			lines := ed.lineBounds()
+			li := ed.lineIndexAt(lines, ed.cursor)
+			to := li + repeat - 1
+			if to >= len(lines) {
+				to = len(lines) - 1
+			}
+			end := len(ed.text)
+			if to+1 < len(lines) {
+				end = lines[to+1][0]
+			}
+			ed.applyCaseRange(lines[li][0], end, dir)
+		}
 	case VisualBlock:
 		cells := e.visualBlockCells()
 		for _, c := range cells {
-			e.applyCaseRange(c[0], c[1], dir)
+			e.applyCaseRange(c.start, c.end, dir)
 		}
-		if len(cells) > 0 {
-			e.cursor = cells[0][0]
+		for _, c := range cells {
+			if !c.pad {
+				e.cursor = c.start
+				break
+			}
+		}
+		c1, c2 := e.visualBlockCols()
+		n := len(cells)
+		e.lastEdit = func(ed *Editor) {
+			repeat := n
+			if ed.dotCount > 0 {
+				repeat = ed.dotCount
+			}
+			lines := ed.lineBounds()
+			li := ed.lineIndexAt(lines, ed.cursor)
+			for _, c := range ed.blockCellsAt(li, li+repeat-1, c1, c2, false) {
+				ed.applyCaseRange(c.start, c.end, dir)
+			}
 		}
 	default:
 		s, en, ok := e.visualCharSpan()
@@ -651,6 +722,18 @@ func (e *Editor) operateVisualCase(dir int) {
 		}
 		e.applyCaseRange(s, en+1, dir)
 		e.cursor = s
+		n := en + 1 - s
+		e.lastEdit = func(ed *Editor) {
+			repeat := n
+			if ed.dotCount > 0 {
+				repeat = ed.dotCount
+			}
+			end := ed.cursor + repeat
+			if end > len(ed.text) {
+				end = len(ed.text)
+			}
+			ed.applyCaseRange(ed.cursor, end, dir)
+		}
 	}
 	e.normalCursorClamp()
 }
@@ -688,12 +771,27 @@ func (e *Editor) operateVisualJoin() {
 	if !ok || first == last {
 		// Single-line visual J joins with the next line (nvim).
 		e.joinLines(1)
+		e.lastEdit = func(ed *Editor) {
+			repeat := 1
+			if ed.dotCount > 0 {
+				repeat = ed.dotCount
+			}
+			ed.joinLines(repeat)
+		}
 		return
 	}
 	count := last - first + 1
 	lines := e.lineBounds()
 	e.cursor = lines[first][0]
 	e.joinLines(count)
+	n := count
+	e.lastEdit = func(ed *Editor) {
+		repeat := n
+		if ed.dotCount > 0 {
+			repeat = ed.dotCount
+		}
+		ed.joinLines(repeat)
+	}
 }
 
 func (e *Editor) feedVisual(key string) Action {
@@ -740,8 +838,9 @@ func (e *Editor) feedVisual(key string) Action {
 		if sub, ok := e.printable(key); ok {
 			switch sub {
 			case 'e', 'E':
+				cnt := e.takeCount()
 				p := e.wordEndBack(e.cursor, sub == 'E')
-				for i := 1; i < e.takeCount(); i++ {
+				for i := 1; i < cnt; i++ {
 					if p == 0 {
 						break
 					}
@@ -752,7 +851,11 @@ func (e *Editor) feedVisual(key string) Action {
 				e.setVisualCursor(e.lastNonBlankOnLine(e.cursor, e.takeCount()))
 			case 'g':
 				lines := e.lineBounds()
-				e.placeAtColumn(lines[0][0], e.cursorColumn(e.cursor))
+				li := e.takeCount() - 1
+				if li >= len(lines) {
+					li = len(lines) - 1
+				}
+				e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
 				if e.visualKind == VisualBlock {
 					e.visBlockCursorCol = e.cursorColumn(e.cursor)
 				}
@@ -839,7 +942,14 @@ func (e *Editor) feedVisual(key string) Action {
 			return ActStay
 		case 'G':
 			lines := e.lineBounds()
-			e.placeAtColumn(lines[len(lines)-1][0], e.cursorColumn(e.cursor))
+			li := len(lines) - 1
+			if e.count > 0 {
+				li = e.takeCount() - 1
+				if li >= len(lines) {
+					li = len(lines) - 1
+				}
+			}
+			e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
 			if e.visualKind == VisualBlock {
 				e.visBlockCursorCol = e.cursorColumn(e.cursor)
 			}

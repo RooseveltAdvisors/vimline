@@ -120,6 +120,8 @@ type Editor struct {
 
 	lastEdit func(*Editor)
 
+	changeBlockSpan [2]int
+
 	// Visual mode state. cursor is the active end; visAnchor is the fixed end.
 	visualKind               VisualKind
 	visAnchor                int
@@ -135,7 +137,6 @@ type Editor struct {
 	visAtEOL                 bool     // charwise selection includes trailing newline
 	visBlockAtEOL            bool     // blockwise $: each line extends through its EOL
 	blockChangeCols          [][2]int // remaining lines [lineStart, col] for blockwise c
-	blockChangeFrom          int
 }
 
 func New(s string) *Editor {
@@ -165,6 +166,7 @@ func (e *Editor) SetMode(m Mode) {
 		// SetMode is a host reset, not a typed Vim mode transition. Do not let
 		// the implicit New() insert transaction absorb a later normal command.
 		e.inChange = false
+		e.blockChangeCols = nil
 	}
 	e.mode = m
 	if m == ModeNormal {
@@ -1344,6 +1346,8 @@ func (e *Editor) beginChange(m rune, count int) {
 	e.changeFindCh = 0
 	e.changeRepeat = false
 	e.changeSpan = nil
+	e.changeBlockSpan = [2]int{}
+	e.blockChangeCols = nil
 	e.changeCount = count
 	e.changeFrom = e.cursor
 	e.historyCursor = e.cursor
@@ -1357,7 +1361,7 @@ func (e *Editor) beginChange(m rune, count int) {
 	// logical Vim change and must be retained while later per-rune snapshots are
 	// folded into it.
 	switch m {
-	case 'C', 'L', 'S', 's', 'O', 'o', 'V', 'F', 'g', '$', 'w', 'W', 'e', 'E', 'f', 't', 'T', 'b', 'B', '0', '^', 'h', 'l', ' ', '%', '{', '}', '(', ')':
+	case 'C', 'L', 'S', 's', 'O', 'o', 'V', 'F', 'g', '$', 'w', 'W', 'e', 'E', 'f', 't', 'T', 'b', 'B', '0', '^', 'h', 'l', ' ', '%', '{', '}', '(', ')', 'c':
 		if e.changeUndoAt > 0 {
 			e.changeUndoAt--
 		}
@@ -1386,6 +1390,7 @@ func (e *Editor) endChange() {
 	findRep := e.changeRepeat
 	count := e.changeCount
 	changeSpan := e.changeSpan
+	blockSpan := e.changeBlockSpan
 	from, to := e.changeFrom, e.cursor
 	if from < 0 {
 		from = 0
@@ -1408,7 +1413,6 @@ func (e *Editor) endChange() {
 	// Blockwise Visual c: replicate the typed insert onto the other lines.
 	if len(e.blockChangeCols) > 0 && len(ins) > 0 {
 		cols := append([][2]int(nil), e.blockChangeCols...)
-		e.pushUndo()
 		for _, spec := range cols {
 			lines := e.lineBounds()
 			li := spec[0]
@@ -1597,6 +1601,42 @@ func (e *Editor) endChange() {
 				end = len(ed.text)
 			}
 			ed.deleteRange(q, end)
+			ed.insertRunes(ins)
+		case 'c': // visual change repeat
+			if blockSpan[1] > 0 {
+				col, width := blockSpan[0], blockSpan[1]
+				lines := ed.lineBounds()
+				li := ed.lineIndexAt(lines, ed.cursor)
+				cells := ed.blockCellsAt(li, li+repeatCount-1, col, col+width-1, false)
+				lineReg := blockRegister(ed.text, cells, width)
+				for i := len(cells) - 1; i >= 0; i-- {
+					c := cells[i]
+					ed.text = append(ed.text[:c.start], ed.text[c.end:]...)
+				}
+				ed.reg = lineReg
+				ed.regLinewise = false
+				for i := len(cells) - 1; i >= 0; i-- {
+					c := cells[i]
+					if c.pad {
+						continue
+					}
+					at := lines[c.line][0] + col
+					if at > lines[c.line][1] {
+						at = lines[c.line][1]
+					}
+					ed.text = append(ed.text[:at], append(append([]rune(nil), ins...), ed.text[at:]...)...)
+					ed.cursor = at + len(ins)
+				}
+				break
+			}
+			end := ed.cursor
+			for i := 0; i < repeatCount; i++ {
+				end = ed.nextGrapheme(end)
+			}
+			if end > len(ed.text) {
+				end = len(ed.text)
+			}
+			ed.deleteRange(ed.cursor, end)
 			ed.insertRunes(ins)
 		default:
 			if changeSpan != nil {
@@ -2881,8 +2921,10 @@ func (e *Editor) feedInsert(key string) Action {
 		e.normalCursorClamp()
 		return ActStay
 	case "enter":
+		e.blockChangeCols = nil
 		return ActAccept
 	case "ctrl-c":
+		e.blockChangeCols = nil
 		return ActCancel
 	case "bs":
 		if e.mode == ModeReplace && len(e.replaceSteps) > 0 {
