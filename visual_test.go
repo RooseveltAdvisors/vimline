@@ -422,3 +422,30 @@ func TestVisualLineTextObjectAdoptsCharwise(t *testing.T) {
 		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
 	}
 }
+
+func TestVisualBlockChangeDropsReplicationOnLineEdits(t *testing.T) {
+	e := newVisualAt("zzzz\naaaa\nbbbb\ncccc", 5)
+	feedVisualSeq(e, "<C-v>jjlcX<bs><bs>YZ<esc>")
+	if e.Text() != "zzzzYZaa\nbb\ncc" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Register() != "aa\nbb\ncc" {
+		t.Fatalf("reg = %q", e.Register())
+	}
+	if e.Cursor() != 5 {
+		t.Fatalf("cursor = %d want 5", e.Cursor())
+	}
+}
+
+func TestVisualBlockChangeReplicatesTypedOnlyChurn(t *testing.T) {
+	e := newVisualAt("abcd\nefgh\nijkl", 0)
+	feedVisualSeq(e, "<C-v>jjlcXY")
+	e.Feed("ctrl-u")
+	feedVisualSeq(e, "Z<esc>")
+	if e.Text() != "Zcd\nZgh\nZkl" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Register() != "ab\nef\nij" {
+		t.Fatalf("reg = %q", e.Register())
+	}
+}

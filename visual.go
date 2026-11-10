@@ -893,14 +893,8 @@ func (e *Editor) feedVisual(key string) Action {
 				e.swapVisualEnds()
 			}
 			return ActStay
-		case 'h', 'l', 'w', 'W', 'b', 'B', 'e', 'E', '0', '^', '_', '$', ' ', '|', '+', '-', '(', ')', '{', '}':
+		case 'h', 'l', 'j', 'k', 'w', 'W', 'b', 'B', 'e', 'E', '0', '^', '_', '$', ' ', '|', '+', '-', '(', ')', '{', '}':
 			e.visualMotion(r, e.takeCount())
-			return ActStay
-		case 'j':
-			e.visualMotion('j', e.takeCount())
-			return ActStay
-		case 'k':
-			e.visualMotion('k', e.takeCount())
 			return ActStay
 		case '%':
 			if e.count > 0 {

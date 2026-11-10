@@ -1410,8 +1410,14 @@ func (e *Editor) endChange() {
 		from = to
 	}
 	ins := append([]rune(nil), e.text[from:to]...)
+	insOK := string(e.text[:from]) == string(e.changeStart[:from]) && string(e.text[to:]) == string(e.changeStart[from:])
+	for _, r := range ins {
+		if r == '\n' {
+			insOK = false
+		}
+	}
 	// Blockwise Visual c: replicate the typed insert onto the other lines.
-	if len(e.blockChangeCols) > 0 && len(ins) > 0 {
+	if insOK && len(e.blockChangeCols) > 0 && len(ins) > 0 {
 		cols := append([][2]int(nil), e.blockChangeCols...)
 		for _, spec := range cols {
 			lines := e.lineBounds()
@@ -1658,6 +1664,9 @@ func (e *Editor) endChange() {
 			ed.cursor = ed.prevGrapheme(ed.cursor)
 		}
 		ed.normalCursorClamp()
+	}
+	if kind == 'c' && !insOK {
+		e.lastEdit = nil
 	}
 }
 
