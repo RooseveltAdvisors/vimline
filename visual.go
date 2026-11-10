@@ -803,11 +803,13 @@ func (e *Editor) feedVisual(key string) Action {
 		m := e.pending
 		e.pending = 0
 		if key == "esc" {
+			e.count = 0
 			return ActStay
 		}
 		if r, ok := e.printable(key); ok {
 			e.visualFind(m, r, e.takeCount(), false)
 		}
+		e.count = 0
 		return ActStay
 	}
 
@@ -816,11 +818,13 @@ func (e *Editor) feedVisual(key string) Action {
 		around := e.pending == 'a'
 		e.pending = 0
 		if key == "esc" {
+			e.count = 0
 			return ActStay
 		}
 		if obj, ok := e.printable(key); ok {
 			e.visualTextObject(around, obj, e.takeCount())
 		}
+		e.count = 0
 		return ActStay
 	}
 
@@ -836,6 +840,7 @@ func (e *Editor) feedVisual(key string) Action {
 	if e.pending == 'g' {
 		e.pending = 0
 		if key == "esc" {
+			e.count = 0
 			return ActStay
 		}
 		if sub, ok := e.printable(key); ok {
@@ -858,18 +863,24 @@ func (e *Editor) feedVisual(key string) Action {
 				if li >= len(lines) {
 					li = len(lines) - 1
 				}
-				e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
+				col := e.visBlockCursorCol
+				if e.visualKind != VisualBlock {
+					col = e.cursorColumn(e.cursor)
+				}
+				e.placeAtColumn(lines[li][0], col)
 				if e.visualKind == VisualBlock {
-					e.visBlockCursorCol = e.cursorColumn(e.cursor)
+					e.visBlockCursorCol = col
 				}
 			}
 		}
+		e.count = 0
 		return ActStay
 	}
 
 	if r, ok := e.printable(key); ok {
 		switch r {
 		case 'v':
+			e.count = 0
 			if e.visualKind == VisualChar {
 				e.exitVisual(true)
 			} else {
@@ -877,6 +888,7 @@ func (e *Editor) feedVisual(key string) Action {
 			}
 			return ActStay
 		case 'V':
+			e.count = 0
 			if e.visualKind == VisualLine {
 				e.exitVisual(true)
 			} else {
@@ -884,9 +896,11 @@ func (e *Editor) feedVisual(key string) Action {
 			}
 			return ActStay
 		case 'o':
+			e.count = 0
 			e.swapVisualEnds()
 			return ActStay
 		case 'O':
+			e.count = 0
 			if e.visualKind == VisualBlock {
 				e.swapVisualBlockCorners()
 			} else {
@@ -911,6 +925,7 @@ func (e *Editor) feedVisual(key string) Action {
 			return ActStay
 		case ';', ',':
 			if e.findCh == 0 {
+				e.count = 0
 				return ActStay
 			}
 			kind := e.findKind
@@ -946,9 +961,13 @@ func (e *Editor) feedVisual(key string) Action {
 					li = len(lines) - 1
 				}
 			}
-			e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
+			col := e.visBlockCursorCol
+			if e.visualKind != VisualBlock {
+				col = e.cursorColumn(e.cursor)
+			}
+			e.placeAtColumn(lines[li][0], col)
 			if e.visualKind == VisualBlock {
-				e.visBlockCursorCol = e.cursorColumn(e.cursor)
+				e.visBlockCursorCol = col
 			}
 			return ActStay
 		}
@@ -957,13 +976,11 @@ func (e *Editor) feedVisual(key string) Action {
 	switch key {
 	case "esc":
 		// Clear selection and return to Normal without buffer or history mutation.
-		undoBefore := len(e.undo)
+		e.count = 0
 		e.exitVisual(true)
-		if len(e.undo) != undoBefore {
-			e.undo = e.undo[:undoBefore]
-		}
 		return ActStay
 	case "ctrl-v":
+		e.count = 0
 		if e.visualKind == VisualBlock {
 			e.exitVisual(true)
 		} else {
@@ -988,10 +1005,13 @@ func (e *Editor) feedVisual(key string) Action {
 		e.visualMotion('k', e.takeCount())
 		return ActStay
 	case "ctrl-c":
+		e.count = 0
 		e.exitVisual(true)
 		return ActCancel
 	case "enter":
+		e.count = 0
 		return ActAccept
 	}
+	e.count = 0
 	return ActStay
 }

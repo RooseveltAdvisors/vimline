@@ -29,7 +29,7 @@ for {
     }
 }
 v := e.View("/", true)        // Label, Text, Cursor, Mode, Pending, Count,
-                              // SelActive/SelStart/SelEnd/VisualKind
+                              // SelActive/SelStart/SelEnd/VisualKind/SelRows
 ```
 
 `Feed` takes the same key names a terminal decoder produces: `enter`, `esc`,
@@ -42,7 +42,9 @@ selection. Motions expand the selection; `i`/`a` text objects set it; operators
 `d c y > < = ~ u U J` act on it. `o`/`O` swap endpoints. `esc` clears the
 selection without buffer or history mutation. `gv` reselects the prior visual
 range (`g` still returns `ActFirst` for field navigation; the following `v`
-completes the reselect).
+completes the reselect). For a blockwise selection the faithful geometry is
+the per-row spans in `View.SelRows` (one inclusive span per selected row);
+`SelStart`/`SelEnd` stay a flat bounding range for compatibility.
 
 Known gap: search patterns use Go's `regexp` engine. Vim-specific pattern
 atoms are not translated, so Vim pattern syntax is not supported in v0.4.0.

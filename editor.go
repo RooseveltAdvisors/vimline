@@ -1665,9 +1665,6 @@ func (e *Editor) endChange() {
 		}
 		ed.normalCursorClamp()
 	}
-	if kind == 'c' && !insOK {
-		e.lastEdit = nil
-	}
 }
 
 func (e *Editor) applyInsertCount() {
@@ -2891,8 +2888,6 @@ func (e *Editor) Feed(key string) Action {
 	switch e.mode {
 	case ModeInsert, ModeReplace:
 		return e.feedInsert(key)
-	case ModeVisual:
-		return e.feedVisual(key)
 	default:
 		return e.feedNormal(key)
 	}
@@ -3383,6 +3378,11 @@ type View struct {
 	SelStart   int // inclusive selection start when SelActive
 	SelEnd     int // inclusive selection end when SelActive
 	VisualKind VisualKind
+
+	// SelRows holds one inclusive span per blockwise-selected row; these
+	// spans are the faithful VisualBlock geometry. SelStart/SelEnd stay a
+	// flat bounding range for compatibility.
+	SelRows [][2]int
 }
 
 // View returns the renderable snapshot of the Editor.
@@ -3400,6 +3400,15 @@ func (e *Editor) View(label string, focused bool) View {
 		}
 	}
 	selStart, selEnd, selActive := e.visualSelBounds()
+	var selRows [][2]int
+	if selActive && e.visualKind == VisualBlock {
+		for _, c := range e.visualBlockCells() {
+			if c.pad || c.start >= c.end {
+				continue
+			}
+			selRows = append(selRows, [2]int{c.start, c.end - 1})
+		}
+	}
 	return View{
 		Label:      label,
 		Text:       e.Text(),
@@ -3412,5 +3421,6 @@ func (e *Editor) View(label string, focused bool) View {
 		SelStart:   selStart,
 		SelEnd:     selEnd,
 		VisualKind: e.visualKind,
+		SelRows:    selRows,
 	}
 }

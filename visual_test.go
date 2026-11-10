@@ -408,7 +408,7 @@ func TestVisualBlockCaseDotRepeatAnchorsAtCursor(t *testing.T) {
 func TestVisualLineTextObjectAdoptsCharwise(t *testing.T) {
 	e := newVisualAt("one two three", 4)
 	feedVisualSeq(e, "Viwd")
-	if e.Text() != "one three" || e.Register() != "two" {
+	if e.Text() != "one  three" || e.Register() != "two" {
 		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
 	}
 	e = newVisualAt("aa (bb) cc", 4)
@@ -447,5 +447,54 @@ func TestVisualBlockChangeReplicatesTypedOnlyChurn(t *testing.T) {
 	}
 	if e.Register() != "ab\nef\nij" {
 		t.Fatalf("reg = %q", e.Register())
+	}
+}
+
+func TestVisualCountDroppedOnToggleAndCancel(t *testing.T) {
+	e := newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "v2old")
+	if e.Text() != "cdef" || e.Register() != "ab" {
+		t.Fatalf("o toggle text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "v2vlx")
+	if e.Text() != "acdef" || e.Register() != "b" {
+		t.Fatalf("v toggle text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "v2f<esc>lx")
+	if e.Text() != "cdef" || e.Register() != "ab" {
+		t.Fatalf("find cancel text=%q reg=%q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualBlockGotoKeepsVirtualColumn(t *testing.T) {
+	e := newVisualAt("abcd\nwxyz12\nef", 2)
+	feedVisualSeq(e, "<C-v>Gd")
+	if e.Text() != "abd\nwxz12\nef" || e.Register() != "c\ny\n" {
+		t.Fatalf("G text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcd\nef\nwxyz12", 2)
+	feedVisualSeq(e, "<C-v>2ggd")
+	if e.Text() != "abd\nef\nwxyz12" || e.Register() != "c\n" {
+		t.Fatalf("gg text=%q reg=%q", e.Text(), e.Register())
+	}
+}
+
+func TestViewBlockwisePerRowSpans(t *testing.T) {
+	e := newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>l")
+	v := e.View("/", true)
+	if !v.SelActive || v.SelStart != 0 || v.SelEnd != 6 {
+		t.Fatalf("flat sel active=%v start=%d end=%d", v.SelActive, v.SelStart, v.SelEnd)
+	}
+	want := [][2]int{{0, 1}, {5, 6}}
+	if len(v.SelRows) != len(want) {
+		t.Fatalf("rows = %v want %v", v.SelRows, want)
+	}
+	for i := range want {
+		if v.SelRows[i] != want[i] {
+			t.Fatalf("rows = %v want %v", v.SelRows, want)
+		}
 	}
 }
