@@ -62,6 +62,9 @@ func TestNeovimDifferentialVisual(t *testing.T) {
 		{Name: "blockwise c", Text: "abcd\nefgh", Pos: 0, Keys: splitVisualOracleKeys("<C-v>jlcX<esc>")},
 		{Name: "linewise Vd curswant", Text: "abcdef\nxyz", Pos: 3, Keys: splitVisualOracleKeys("Vd")},
 		{Name: "block $ unequal", Text: "abc\nde\nfgh", Pos: 1, Keys: splitVisualOracleKeys("<C-v>j$d")},
+		{Name: "counted v entry", Text: "abcdef", Pos: 0, Keys: splitVisualOracleKeys("2vld")},
+		{Name: "counted V entry", Text: "a\nb\nc\nd", Pos: 0, Keys: splitVisualOracleKeys("2Vjd")},
+		{Name: "counted ctrl-v entry", Text: "abcd\nefgh", Pos: 0, Keys: splitVisualOracleKeys("2<C-v>jd")},
 	}
 	for i := range cases {
 		before := []rune(cases[i].Text)[:cases[i].Pos]

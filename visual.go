@@ -12,6 +12,7 @@ const (
 )
 
 func (e *Editor) enterVisual(kind VisualKind) {
+	n := e.count
 	e.clearPendingState()
 	e.pendingGV = false
 	e.blockChangeCols = nil
@@ -26,6 +27,26 @@ func (e *Editor) enterVisual(kind VisualKind) {
 	}
 	e.visBlockAnchorCol = e.cursorColumn(e.visAnchor)
 	e.visBlockCursorCol = e.visBlockAnchorCol
+	if n > 1 {
+		switch kind {
+		case VisualChar:
+			p := e.cursor
+			for i := 1; i < n && p < len(e.text); i++ {
+				p = e.nextGrapheme(p)
+			}
+			e.setVisualCursor(p)
+		case VisualLine:
+			lines := e.lineBounds()
+			li := e.lineIndexAt(lines, e.cursor) + n - 1
+			if li >= len(lines) {
+				li = len(lines) - 1
+			}
+			e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
+		case VisualBlock:
+			e.visBlockCursorCol = e.visBlockAnchorCol + n - 1
+			e.placeAtColumn(e.cursor, e.visBlockCursorCol)
+		}
+	}
 }
 
 func (e *Editor) exitVisual(save bool) {

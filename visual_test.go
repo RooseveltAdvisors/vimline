@@ -498,3 +498,26 @@ func TestViewBlockwisePerRowSpans(t *testing.T) {
 		}
 	}
 }
+
+func TestVisualCountedEntryExtent(t *testing.T) {
+	e := newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "2vld")
+	if e.Text() != "def" || e.Register() != "abc" {
+		t.Fatalf("charwise text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "2vy")
+	if e.Register() != "ab" {
+		t.Fatalf("charwise yank reg=%q", e.Register())
+	}
+	e = newVisualAt("a\nb\nc\nd", 0)
+	feedVisualSeq(e, "2Vjd")
+	if e.Text() != "d" || e.Register() != "a\nb\nc\n" {
+		t.Fatalf("linewise text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "2<C-v>jd")
+	if e.Text() != "cd\ngh" || e.Register() != "ab\nef" {
+		t.Fatalf("blockwise text=%q reg=%q", e.Text(), e.Register())
+	}
+}
