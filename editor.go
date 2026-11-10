@@ -120,7 +120,7 @@ type Editor struct {
 
 	lastEdit func(*Editor)
 
-	changeBlockSpan [2]int
+	changeBlockWidth int
 
 	// Visual mode state. cursor is the active end; visAnchor is the fixed end.
 	visualKind               VisualKind
@@ -1346,7 +1346,7 @@ func (e *Editor) beginChange(m rune, count int) {
 	e.changeFindCh = 0
 	e.changeRepeat = false
 	e.changeSpan = nil
-	e.changeBlockSpan = [2]int{}
+	e.changeBlockWidth = 0
 	e.blockChangeCols = nil
 	e.changeCount = count
 	e.changeFrom = e.cursor
@@ -1390,7 +1390,7 @@ func (e *Editor) endChange() {
 	findRep := e.changeRepeat
 	count := e.changeCount
 	changeSpan := e.changeSpan
-	blockSpan := e.changeBlockSpan
+	blockWidth := e.changeBlockWidth
 	from, to := e.changeFrom, e.cursor
 	if from < 0 {
 		from = 0
@@ -1603,29 +1603,21 @@ func (e *Editor) endChange() {
 			ed.deleteRange(q, end)
 			ed.insertRunes(ins)
 		case 'c': // visual change repeat
-			if blockSpan[1] > 0 {
-				col, width := blockSpan[0], blockSpan[1]
+			if blockWidth > 0 {
+				col := ed.cursorColumn(ed.cursor)
 				lines := ed.lineBounds()
 				li := ed.lineIndexAt(lines, ed.cursor)
-				cells := ed.blockCellsAt(li, li+repeatCount-1, col, col+width-1, false)
-				lineReg := blockRegister(ed.text, cells, width)
-				for i := len(cells) - 1; i >= 0; i-- {
-					c := cells[i]
-					ed.text = append(ed.text[:c.start], ed.text[c.end:]...)
-				}
-				ed.reg = lineReg
+				cells := ed.blockCellsAt(li, li+repeatCount-1, col, col+blockWidth-1, false)
+				ed.reg = blockRegister(ed.text, cells, blockWidth)
 				ed.regLinewise = false
 				for i := len(cells) - 1; i >= 0; i-- {
 					c := cells[i]
+					ed.text = append(ed.text[:c.start], ed.text[c.end:]...)
 					if c.pad {
 						continue
 					}
-					at := lines[c.line][0] + col
-					if at > lines[c.line][1] {
-						at = lines[c.line][1]
-					}
-					ed.text = append(ed.text[:at], append(append([]rune(nil), ins...), ed.text[at:]...)...)
-					ed.cursor = at + len(ins)
+					ed.text = append(ed.text[:c.start], append(append([]rune(nil), ins...), ed.text[c.start:]...)...)
+					ed.cursor = c.start + len(ins)
 				}
 				break
 			}

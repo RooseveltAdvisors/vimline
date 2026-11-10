@@ -444,9 +444,9 @@ func (e *Editor) visualTextObject(around bool, obj rune, count int) bool {
 	}
 	e.visAnchor = s
 	e.setVisualCursor(end)
-	if obj == 'p' || e.visualKind == VisualLine {
+	if obj == 'p' {
 		e.visualKind = VisualLine
-	} else if e.visualKind == VisualBlock {
+	} else {
 		e.visualKind = VisualChar
 	}
 	return true
@@ -560,7 +560,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 			// After delete, remember other lines' insert columns for blockwise
 			// change replication when insert ends.
 			e.beginChange('c', len(cells))
-			e.changeBlockSpan = [2]int{c1, width}
+			e.changeBlockWidth = width
 			for i := first + 1; i < len(cells); i++ {
 				c := cells[i]
 				if c.pad {
@@ -580,7 +580,8 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 				}
 				lines := ed.lineBounds()
 				li := ed.lineIndexAt(lines, ed.cursor)
-				blk := ed.blockCellsAt(li, li+repeat-1, c1, c2, false)
+				col := ed.cursorColumn(ed.cursor)
+				blk := ed.blockCellsAt(li, li+repeat-1, col, col+width-1, false)
 				ed.reg = blockRegister(ed.text, blk, width)
 				ed.regLinewise = false
 				for i := len(blk) - 1; i >= 0; i-- {
@@ -704,6 +705,7 @@ func (e *Editor) operateVisualCase(dir int) {
 		}
 		c1, c2 := e.visualBlockCols()
 		n := len(cells)
+		width := c2 - c1 + 1
 		e.lastEdit = func(ed *Editor) {
 			repeat := n
 			if ed.dotCount > 0 {
@@ -711,7 +713,8 @@ func (e *Editor) operateVisualCase(dir int) {
 			}
 			lines := ed.lineBounds()
 			li := ed.lineIndexAt(lines, ed.cursor)
-			for _, c := range ed.blockCellsAt(li, li+repeat-1, c1, c2, false) {
+			col := ed.cursorColumn(ed.cursor)
+			for _, c := range ed.blockCellsAt(li, li+repeat-1, col, col+width-1, false) {
 				ed.applyCaseRange(c.start, c.end, dir)
 			}
 		}

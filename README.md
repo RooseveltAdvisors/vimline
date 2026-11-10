@@ -60,10 +60,13 @@ nvim 0.12.4; `=` on a leading-tab line leaves the cursor at the last column in
 that binary while vimline (and space-indented lines) use first-non-blank; Visual
 `$` / MAXCOL virtual-column edges beyond the accepted unequal-line block `$`
 path are the same family as the `>>` virtual-column gap and are deferred - see
-task oracle notes when comparing. Within that deferral: on a ragged `$` block
-whose cursor row ends before the block column, nvim moves the block's left edge
-to that row's EOL and pads short rows' register lines with spaces, where
-vimline keeps the anchor column and records an empty line.
+task oracle notes when comparing. Within that deferral (probed on nvim 0.12.4):
+when the cursor row of a ragged `$` block ends before the block column, nvim
+moves the block's left edge to that row's EOL and records empty register lines
+for the short rows, where vimline keeps the anchor column (the short rows'
+empty register lines agree); when the cursor row is long and only other rows
+are ragged, nvim pads those rows' register lines with spaces where vimline
+records empty lines.
 
 ## Binding acceptance
 

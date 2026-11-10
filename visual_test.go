@@ -365,3 +365,60 @@ func TestVisualIndentRepeatSurvivesShrink(t *testing.T) {
 		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
 	}
 }
+
+func TestVisualBlockChangeDotRepeatAnchorsAtCursor(t *testing.T) {
+	e := newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>jlcXY<esc>.")
+	if e.Text() != "XXYd\nXXYh" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Register() != "Yc\nYg" {
+		t.Fatalf("reg = %q", e.Register())
+	}
+	if e.Cursor() != 2 {
+		t.Fatalf("cursor = %d want 2", e.Cursor())
+	}
+}
+
+func TestVisualBlockDeleteDotRepeatAnchorsAtCursor(t *testing.T) {
+	e := newVisualAt("abcd\nefgh\nijkl\nmnop", 0)
+	feedVisualSeq(e, "<C-v>ljldjjll.")
+	if e.Text() != "d\nh\nij\nmn" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Register() != "kl\nop" {
+		t.Fatalf("reg = %q", e.Register())
+	}
+	if e.Cursor() != 5 {
+		t.Fatalf("cursor = %d want 5", e.Cursor())
+	}
+}
+
+func TestVisualBlockCaseDotRepeatAnchorsAtCursor(t *testing.T) {
+	e := newVisualAt("abcd\nefgh\nijkl\nmnop", 0)
+	feedVisualSeq(e, "<C-v>lj~jjll.")
+	if e.Text() != "ABcd\nEFgh\nijKL\nmnOP" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Cursor() != 12 {
+		t.Fatalf("cursor = %d want 12", e.Cursor())
+	}
+}
+
+func TestVisualLineTextObjectAdoptsCharwise(t *testing.T) {
+	e := newVisualAt("one two three", 4)
+	feedVisualSeq(e, "Viwd")
+	if e.Text() != "one three" || e.Register() != "two" {
+		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("aa (bb) cc", 4)
+	feedVisualSeq(e, "Vi)d")
+	if e.Text() != "aa () cc" || e.Register() != "bb" {
+		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("One two.\nThree four.", 0)
+	feedVisualSeq(e, "Visd")
+	if e.Text() != "\nThree four." || e.Register() != "One two." {
+		t.Fatalf("text=%q reg=%q", e.Text(), e.Register())
+	}
+}
