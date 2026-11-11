@@ -523,6 +523,7 @@ func (e *Editor) operateIndent(op, motion rune, count, levels int) {
 	if levels < 1 {
 		levels = 1
 	}
+	col := e.cursorColumn(e.cursor)
 	lines := e.lineBounds()
 	cur := e.lineIndexAt(lines, e.cursor)
 	first, last := cur, cur
@@ -592,11 +593,15 @@ func (e *Editor) operateIndent(op, motion rune, count, levels int) {
 		}
 	}
 	lines = e.lineBounds()
-	p := lines[first][0]
-	if op == '<' && lines[first][1] > lines[first][0] {
-		p = lines[first][1] - 1
+	if op == '=' {
+		e.placeAtColumn(lines[first][0], col)
+	} else {
+		p := lines[first][0]
+		if op == '<' && lines[first][1] > lines[first][0] {
+			p = lines[first][1] - 1
+		}
+		e.cursor = p
 	}
-	e.cursor = p
 	oo, mm, cc, lv := op, motion, count, levels
 	e.lastEdit = func(ed *Editor) {
 		repeat := cc

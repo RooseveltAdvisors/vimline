@@ -816,12 +816,8 @@ func (e *Editor) operateVisualIndent(op rune, levels int) {
 		return
 	}
 	lines := e.lineBounds()
-	e.cursor = lines[first][0]
+	e.placeAtColumn(lines[first][0], e.cursorColumn(e.cursor))
 	e.operateIndent(op, op, last-first+1, levels)
-	if op == '=' {
-		lines = e.lineBounds()
-		e.cursor = e.firstNonBlank(lines[first][0])
-	}
 	e.normalCursorClamp()
 }
 

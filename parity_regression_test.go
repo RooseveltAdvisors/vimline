@@ -761,6 +761,16 @@ func TestV031OracleRegressions(t *testing.T) {
 			text: "a\nb\nc\nd", cursor: 6,
 			keys: "dk.", wantText: "", wantPos: 0,
 		},
+		{
+			name: "normal equals preserves cursor column",
+			text: "  abcdef", cursor: 2,
+			keys: "==", wantText: "abcdef", wantPos: 2,
+		},
+		{
+			name: "normal equals motion preserves cursor column",
+			text: "  a\n  b", cursor: 1,
+			keys: "=j", wantText: "a\nb", wantPos: 0,
+		},
 	}
 
 	for _, tc := range cases {

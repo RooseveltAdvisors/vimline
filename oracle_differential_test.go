@@ -214,6 +214,7 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 		{Name: "dot repeat dj register", Text: "abcd\nx\nyz\nw", Pos: 3, Keys: splitOracleKeys("dj.")},
 		{Name: "dot repeat dj register pastes lines", Text: "abcd\nx\nyz\nw\nq", Pos: 3, Keys: splitOracleKeys("dj.p")},
 		{Name: "dot repeat dk register", Text: "a\nb\nc\nd", Pos: 6, Keys: splitOracleKeys("dk.")},
+		{Name: "normal = preserves column", Text: "  abcdef", Pos: 2, Keys: splitOracleKeys("==")},
 	}
 	runOracleDifferential(t, cases, false)
 }

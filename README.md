@@ -68,7 +68,8 @@ objects keep the block rectangle; per-row word expansion is deferred as a
 declared gap this release (not implemented), although matched-column probes
 of `<C-v>jjiwd` on `abcd\nefgh\nijkl` matched nvim 0.12.4. Live oracle binary is
 nvim 0.12.4; `=` on a leading-tab line leaves the cursor at the last column in
-that binary while vimline (and space-indented lines) use first-non-blank; Visual
+that binary while vimline preserves the cursor column as nvim does on
+space-indented lines; Visual
 `$` / MAXCOL virtual-column edges beyond the accepted unequal-line block `$`
 path are the same family as the `>>` virtual-column gap and are deferred - see
 task oracle notes when comparing. Within that deferral (probed on nvim 0.12.4):

@@ -684,6 +684,29 @@ func TestBlockwisePutColumnAligned(t *testing.T) {
 	}
 }
 
+func TestVisualEqualsPreservesCursorColumn(t *testing.T) {
+	e := newVisualAt(" abcdef", 1)
+	feedVisualSeq(e, "V=")
+	if e.Text() != "abcdef" || e.Cursor() != 1 {
+		t.Fatalf("text=%q cursor=%d", e.Text(), e.Cursor())
+	}
+	e = newVisualAt("  abcdef", 2)
+	feedVisualSeq(e, "v2l=")
+	if e.Text() != "abcdef" || e.Cursor() != 4 {
+		t.Fatalf("text=%q cursor=%d", e.Text(), e.Cursor())
+	}
+	e = newVisualAt("  abcdef", 7)
+	feedVisualSeq(e, "V=")
+	if e.Text() != "abcdef" || e.Cursor() != 5 {
+		t.Fatalf("text=%q cursor=%d", e.Text(), e.Cursor())
+	}
+	e = newVisualAt("  a\n  b", 1)
+	feedVisualSeq(e, "Vj=")
+	if e.Text() != "a\nb" || e.Cursor() != 0 {
+		t.Fatalf("text=%q cursor=%d", e.Text(), e.Cursor())
+	}
+}
+
 func TestVisualIndentCountMultipliesLevels(t *testing.T) {
 	e := newVisualAt("abcdef", 0)
 	feedVisualSeq(e, "v2l3>")
