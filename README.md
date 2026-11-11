@@ -51,7 +51,8 @@ atoms are not translated, so Vim pattern syntax is not supported in v0.4.0.
 The Vim-to-RE2 translation layer and nvim differential pattern tests are
 tracked for a later release in `wiseman-tftd`.
 
-Known gaps recorded against nvim 0.12.5 (each verified live): a counted
+Known gaps recorded against the probe host binary nvim 0.12.4 (each
+verified live on that binary): a counted
 `w`/`W` operator that ends in column 0 of a later line
 joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
 `d'a`/`y'a` with the apostrophe mark run charwise where nvim is linewise; a
@@ -66,10 +67,11 @@ the object span where nvim extends by its per-object rules (probed live:
 `vli"y` on `say "hi" now` yanks `"hi"` in nvim). Multi-row blockwise text
 objects keep the block rectangle; per-row word expansion is deferred as a
 declared gap this release (not implemented), although matched-column probes
-of `<C-v>jjiwd` on `abcd\nefgh\nijkl` matched nvim 0.12.4. Live oracle binary is
-nvim 0.12.4; `=` on a leading-tab line leaves the cursor at the last column in
-that binary while vimline preserves the cursor column as nvim does on
-space-indented lines; Visual
+of `<C-v>jjiwd` on `abcd\nefgh\nijkl` matched nvim 0.12.4. Probes ran on
+nvim 0.12.4; the CI differential gate installs v0.12.5 and these gap notes
+were not re-probed there. On the probe binary `=` on a leading-tab line
+leaves the cursor at the last column while vimline preserves the cursor
+column as nvim does on space-indented lines; Visual
 `$` / MAXCOL virtual-column edges beyond the accepted unequal-line block `$`
 path are the same family as the `>>` virtual-column gap and are deferred - see
 task oracle notes when comparing. Within that deferral (probed on nvim 0.12.4):

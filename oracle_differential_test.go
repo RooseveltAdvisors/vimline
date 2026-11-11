@@ -250,7 +250,7 @@ func runOracleDifferential(t *testing.T, cases []oracleCase, visual bool) {
 			e.SetMode(ModeNormal)
 			e.SetCursor(tc.Pos)
 			for _, key := range tc.Keys {
-				e.Feed(oracleKeyName(key))
+				feedOracleKey(e, oracleKeyName(key))
 			}
 			if e.Text() != want.Text || e.Cursor() != want.Pos || e.Register() != want.Reg {
 				t.Fatalf("vimline=(text %q, cursor %d, reg %q), nvim=(text %q, cursor %d, reg %q)",
@@ -350,4 +350,32 @@ func oracleKeyName(key string) string {
 		return "enter"
 	}
 	return key
+}
+
+func feedOracleKey(e *Editor, key string) {
+	act := e.Feed(key)
+	if e.Mode() != ModeNormal {
+		return
+	}
+	lines := e.lineBounds()
+	li := e.lineIndexAt(lines, e.cursor)
+	switch act {
+	case ActDown:
+		li++
+	case ActUp:
+		li--
+	case ActFirst:
+		li = 0
+	case ActLast:
+		li = len(lines) - 1
+	default:
+		return
+	}
+	if li < 0 {
+		li = 0
+	}
+	if li >= len(lines) {
+		li = len(lines) - 1
+	}
+	e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
 }

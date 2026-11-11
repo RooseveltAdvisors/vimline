@@ -2460,20 +2460,11 @@ func (e *Editor) paste(before bool, count int) {
 			col = lineLen
 		}
 		for i, row := range rows {
-			line := row
-			if len(line) == 0 {
-				line = make([]rune, width)
-				for j := range line {
-					line[j] = ' '
-				}
-			}
-			chunk := make([]rune, 0, len(line)*count)
-			for range count {
-				chunk = append(chunk, line...)
-			}
 			bounds := e.lineBounds()
 			target := cursorRow + i
+			created := false
 			for target >= len(bounds) {
+				created = true
 				e.text = append(e.text, '\n')
 				bounds = e.lineBounds()
 			}
@@ -2488,7 +2479,25 @@ func (e *Editor) paste(before bool, count int) {
 			for ; pad > 0; pad-- {
 				insert = append(insert, ' ')
 			}
-			insert = append(insert, chunk...)
+			if created {
+				for c := 0; c < count; c++ {
+					if c > 0 {
+						for g := len(row); g < width; g++ {
+							insert = append(insert, ' ')
+						}
+					}
+					insert = append(insert, row...)
+				}
+			} else {
+				line := make([]rune, width)
+				copy(line, row)
+				for j := len(row); j < width; j++ {
+					line[j] = ' '
+				}
+				for c := 0; c < count; c++ {
+					insert = append(insert, line...)
+				}
+			}
 			e.text = append(e.text[:at], append(insert, e.text[at:]...)...)
 		}
 		e.cursor = e.lineBounds()[cursorRow][0] + col

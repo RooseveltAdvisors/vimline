@@ -6,7 +6,7 @@ import (
 
 func feedVisualSeq(e *Editor, seq string) {
 	for _, key := range splitOracleKeys(seq) {
-		e.Feed(oracleKeyName(key))
+		feedOracleKey(e, oracleKeyName(key))
 	}
 }
 
@@ -684,6 +684,42 @@ func TestBlockwisePutColumnAligned(t *testing.T) {
 	}
 }
 
+func TestBlockwisePutEmptyRowNotPaddedAtBufferEnd(t *testing.T) {
+	e := newVisualAt("abc\nde\nz", 2)
+	feedVisualSeq(e, "<C-v>jyG0P")
+	if e.Text() != "abc\nde\ncz\n" {
+		t.Fatalf("P text = %q", e.Text())
+	}
+	e = newVisualAt("abc\nde\nz", 2)
+	feedVisualSeq(e, "<C-v>jyG0p")
+	if e.Text() != "abc\nde\nzc\n " {
+		t.Fatalf("p text = %q", e.Text())
+	}
+	e = newVisualAt("abc\nde\nz", 2)
+	feedVisualSeq(e, "<C-v>jyG02P")
+	if e.Text() != "abc\nde\nccz\n " {
+		t.Fatalf("counted P text = %q", e.Text())
+	}
+}
+
+func TestBlockwisePutPadsRegisterRowsOnExistingLines(t *testing.T) {
+	e := newVisualAt("abc\nfgxy\nz", 2)
+	feedVisualSeq(e, "<C-v>jlyj0P")
+	if e.Text() != "abc\nc fgxy\nxyz" {
+		t.Fatalf("existing row text = %q", e.Text())
+	}
+	e = newVisualAt("abc\nfgxy\nz", 2)
+	feedVisualSeq(e, "<C-v>jlyG0P")
+	if e.Text() != "abc\nfgxy\nc z\nxy" {
+		t.Fatalf("created row text = %q", e.Text())
+	}
+	e = newVisualAt("abc\nfgxy\nz", 2)
+	feedVisualSeq(e, "<C-v>jlyG02P")
+	if e.Text() != "abc\nfgxy\nc c z\nxyxy" {
+		t.Fatalf("counted created row text = %q", e.Text())
+	}
+}
+
 func TestVisualEqualsPreservesCursorColumn(t *testing.T) {
 	e := newVisualAt(" abcdef", 1)
 	feedVisualSeq(e, "V=")
@@ -775,6 +811,54 @@ func TestVisualGapKeysDiscardOperands(t *testing.T) {
 	}
 	if e.Mode() != ModeVisual {
 		t.Fatalf("mode = %v", e.Mode())
+	}
+}
+
+func TestVisualGapPendingCtrlCCancels(t *testing.T) {
+	e := newVisualAt("abcd", 0)
+	feedVisualSeq(e, "v/")
+	if a := e.Feed("ctrl-c"); a != ActCancel {
+		t.Fatalf("search pending ctrl-c action = %v want ActCancel", a)
+	}
+	feedVisualSeq(e, "x")
+	if e.Text() != "bcd" {
+		t.Fatalf("search pending ctrl-c poisoned later keys: %q", e.Text())
+	}
+	e = newVisualAt("abcd", 0)
+	feedVisualSeq(e, "vllr")
+	if a := e.Feed("ctrl-c"); a != ActCancel {
+		t.Fatalf("replace pending ctrl-c action = %v want ActCancel", a)
+	}
+	feedVisualSeq(e, "x")
+	if e.Text() != "d" {
+		t.Fatalf("replace pending ctrl-c poisoned later keys: %q", e.Text())
+	}
+	e = newVisualAt("abcd", 0)
+	feedVisualSeq(e, "vf")
+	if a := e.Feed("ctrl-c"); a != ActCancel {
+		t.Fatalf("find pending ctrl-c action = %v want ActCancel", a)
+	}
+	feedVisualSeq(e, "x")
+	if e.Text() != "bcd" {
+		t.Fatalf("find pending ctrl-c poisoned later keys: %q", e.Text())
+	}
+	e = newVisualAt("abcd", 0)
+	feedVisualSeq(e, "vi")
+	if a := e.Feed("ctrl-c"); a != ActCancel {
+		t.Fatalf("object pending ctrl-c action = %v want ActCancel", a)
+	}
+	feedVisualSeq(e, "x")
+	if e.Text() != "bcd" {
+		t.Fatalf("object pending ctrl-c poisoned later keys: %q", e.Text())
+	}
+	e = newVisualAt("abcd", 0)
+	feedVisualSeq(e, "vg")
+	if a := e.Feed("ctrl-c"); a != ActCancel {
+		t.Fatalf("g pending ctrl-c action = %v want ActCancel", a)
+	}
+	feedVisualSeq(e, "x")
+	if e.Text() != "bcd" {
+		t.Fatalf("g pending ctrl-c poisoned later keys: %q", e.Text())
 	}
 }
 

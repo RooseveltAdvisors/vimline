@@ -956,6 +956,11 @@ func (e *Editor) operateVisualJoin() {
 }
 
 func (e *Editor) feedVisual(key string) Action {
+	if key == "ctrl-c" && e.pending != 0 {
+		e.pending = 0
+		e.count = 0
+		return ActCancel
+	}
 	if e.pending == 'r' || e.pending == '/' || e.pending == '?' {
 		if e.pending == 'r' || key == "enter" || key == "esc" {
 			e.pending = 0
