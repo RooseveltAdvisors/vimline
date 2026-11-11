@@ -377,5 +377,5 @@ func feedOracleKey(e *Editor, key string) {
 	if li >= len(lines) {
 		li = len(lines) - 1
 	}
-	e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
+	e.placeAtColumn(lines[li][0], e.curswant)
 }

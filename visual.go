@@ -398,7 +398,7 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		idx := e.lineIndexAt(lines, e.cursor)
 		col := e.visBlockCursorCol
 		if e.visualKind != VisualBlock {
-			col = e.cursorColumn(e.cursor)
+			col = e.curswant
 		}
 		idx += count
 		if idx >= len(lines) {
@@ -416,7 +416,7 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		idx := e.lineIndexAt(lines, e.cursor)
 		col := e.visBlockCursorCol
 		if e.visualKind != VisualBlock {
-			col = e.cursorColumn(e.cursor)
+			col = e.curswant
 		}
 		idx -= count
 		if idx < 0 {
@@ -1036,7 +1036,7 @@ func (e *Editor) feedVisual(key string) Action {
 				}
 				col := e.visBlockCursorCol
 				if e.visualKind != VisualBlock {
-					col = e.cursorColumn(e.cursor)
+					col = e.curswant
 				}
 				e.placeAtColumn(lines[li][0], col)
 				if e.visualKind == VisualBlock {
@@ -1142,7 +1142,7 @@ func (e *Editor) feedVisual(key string) Action {
 			}
 			col := e.visBlockCursorCol
 			if e.visualKind != VisualBlock {
-				col = e.cursorColumn(e.cursor)
+				col = e.curswant
 			}
 			e.placeAtColumn(lines[li][0], col)
 			if e.visualKind == VisualBlock {
@@ -1157,6 +1157,7 @@ func (e *Editor) feedVisual(key string) Action {
 		// Clear selection and return to Normal without buffer or history mutation.
 		e.count = 0
 		e.exitVisual(true)
+		e.curswant = e.cursorColumn(e.cursor)
 		return ActStay
 	case "ctrl-v":
 		e.count = 0

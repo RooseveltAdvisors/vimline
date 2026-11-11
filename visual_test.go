@@ -888,3 +888,76 @@ func TestVisualEnterExitsBeforeAccept(t *testing.T) {
 		t.Fatalf("enter then d must not delete a prior visual span: %q", e.Text())
 	}
 }
+
+func TestVisualVerticalMotionsRestoreDesiredColumn(t *testing.T) {
+	e := newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "vjjy")
+	if e.Register() != "efgh\nxy\nQRSTU" {
+		t.Fatalf("vjjy reg = %q", e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 16)
+	feedVisualSeq(e, "vkky")
+	if e.Register() != "efgh\nxy\nQRSTU" {
+		t.Fatalf("vkky reg = %q", e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "vjky")
+	if e.Register() != "e" {
+		t.Fatalf("vjky reg = %q", e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 16)
+	feedVisualSeq(e, "vkjy")
+	if e.Register() != "U" {
+		t.Fatalf("vkjy reg = %q", e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "vjGy")
+	if e.Register() != "efgh\nxy\nQRSTU" {
+		t.Fatalf("vjGy reg = %q", e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "vjggy")
+	if e.Register() != "e" {
+		t.Fatalf("vjggy reg = %q", e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "jvjx")
+	if e.Text() != "abcdefgh\nxVWX" || e.Register() != "y\nQRSTU" {
+		t.Fatalf("jvjx text = %q reg = %q", e.Text(), e.Register())
+	}
+}
+
+func TestNormalNavRestoresDesiredColumn(t *testing.T) {
+	e := newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "jjx")
+	if e.Text() != "abcdefgh\nxy\nQRSTVWX" || e.Register() != "U" {
+		t.Fatalf("jjx text = %q reg = %q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "jjkjx")
+	if e.Text() != "abcdefgh\nxy\nQRSTVWX" || e.Register() != "U" {
+		t.Fatalf("jjkjx text = %q reg = %q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcdefgh\nxy\nQRSTUVWX", 4)
+	feedVisualSeq(e, "vj<esc>jx")
+	if e.Text() != "abcdefgh\nxy\nQSTUVWX" || e.Register() != "R" {
+		t.Fatalf("vj<esc>jx text = %q reg = %q", e.Text(), e.Register())
+	}
+}
+
+func TestGVReselectOnlyImmediatePair(t *testing.T) {
+	e := newVisualAt("aa\nbb\ncc", 0)
+	feedVisualSeq(e, "vj<esc>ggvld")
+	if e.Text() != "\nbb\ncc" || e.Register() != "aa" {
+		t.Fatalf("ggvld text = %q reg = %q", e.Text(), e.Register())
+	}
+	e = newVisualAt("aa\nbb\ncc", 3)
+	feedVisualSeq(e, "vj<esc>g2v")
+	if e.Mode() != ModeVisual {
+		t.Fatalf("mode = %v", e.Mode())
+	}
+	v := e.View("/", true)
+	if !v.SelActive || v.SelStart != 0 {
+		t.Fatalf("g2v selection = %+v want fresh at 0", v)
+	}
+}

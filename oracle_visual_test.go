@@ -74,6 +74,10 @@ func TestNeovimDifferentialVisual(t *testing.T) {
 		{Name: "counted visual shift lines", Text: "a\nb", Pos: 0, Keys: splitOracleKeys("Vj2>")},
 		{Name: "counted visual unshift", Text: "\t\t\tabcdef", Pos: 0, Keys: splitOracleKeys("v2l3<")},
 		{Name: "visual = preserves column", Text: "  abcdef", Pos: 2, Keys: splitOracleKeys("V=")},
+		{Name: "visual vertical restores desired column", Text: "abcdefgh\nxy\nQRSTUVWX", Pos: 4, Keys: splitOracleKeys("vjjy")},
+		{Name: "normal j restores desired column", Text: "abcdefgh\nxy\nQRSTUVWX", Pos: 4, Keys: splitOracleKeys("jjx")},
+		{Name: "esc commits desired column", Text: "abcdefgh\nxy\nQRSTUVWX", Pos: 4, Keys: splitOracleKeys("vj<esc>jx")},
+		{Name: "ggv starts fresh selection", Text: "aa\nbb\ncc", Pos: 0, Keys: splitOracleKeys("vj<esc>ggvld")},
 	}
 	runOracleDifferential(t, cases, true)
 }

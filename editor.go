@@ -75,9 +75,10 @@ type replaceStep struct {
 }
 
 type Editor struct {
-	text   []rune
-	cursor int
-	mode   Mode
+	text     []rune
+	cursor   int
+	curswant int
+	mode     Mode
 
 	pending   rune // 'd', 'c', 'y', 'r', 'f', 'F', 't', 'T', 'i', 'a', 'g'
 	pendingOp rune // operator held while a multi-key motion or text object completes
@@ -156,6 +157,7 @@ type Editor struct {
 func New(s string) *Editor {
 	rs := []rune(s)
 	e := &Editor{text: rs, cursor: len(rs), mode: ModeInsert, marks: make(map[rune]markPos)}
+	e.curswant = e.cursorColumn(e.cursor)
 	e.beginChange('i', 1)
 	return e
 }
@@ -189,7 +191,10 @@ func (e *Editor) SetMode(m Mode) {
 }
 
 // End puts the cursor after the last character.
-func (e *Editor) End() { e.cursor = len(e.text) }
+func (e *Editor) End() {
+	e.cursor = len(e.text)
+	e.curswant = e.cursorColumn(e.cursor)
+}
 
 // SetCursor moves the cursor and clamps it to the buffer.
 func (e *Editor) SetCursor(p int) {
@@ -198,6 +203,7 @@ func (e *Editor) SetCursor(p int) {
 	if e.mode == ModeNormal {
 		e.normalCursorClamp()
 	}
+	e.curswant = e.cursorColumn(e.cursor)
 }
 
 // InsertLiteral inserts literal runes at the cursor while preserving undo history.
@@ -2709,7 +2715,38 @@ func (e *Editor) totalOpCount() int {
 	return oc * e.takeCount()
 }
 
+func visualVerticalKey(key string) bool {
+	switch key {
+	case "j", "k", "g", "G", "down", "up", "+", "-":
+		return true
+	}
+	return false
+}
+
 func (e *Editor) Feed(key string) Action {
+	before := e.cursor
+	gvArmed := e.pendingGV
+	if e.pendingGV {
+		e.pendingGV = false
+		if key == "v" && e.mode == ModeNormal {
+			e.reselectVisual()
+			if e.cursor != before {
+				e.curswant = e.cursorColumn(e.cursor)
+			}
+			return ActStay
+		}
+	}
+	act := e.feedKey(key)
+	if gvArmed && e.pendingGV {
+		e.pendingGV = false
+	}
+	if e.cursor != before && !(e.mode == ModeVisual && visualVerticalKey(key)) {
+		e.curswant = e.cursorColumn(e.cursor)
+	}
+	return act
+}
+
+func (e *Editor) feedKey(key string) Action {
 	if e.searching {
 		switch key {
 		case "esc":
@@ -3112,13 +3149,6 @@ func (e *Editor) feedInsert(key string) Action {
 }
 
 func (e *Editor) feedNormal(key string) Action {
-	if e.pendingGV {
-		e.pendingGV = false
-		if key == "v" {
-			e.reselectVisual()
-			return ActStay
-		}
-	}
 	if key == "ctrl-v" {
 		e.enterVisual(VisualBlock)
 		return ActStay
