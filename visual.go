@@ -11,6 +11,28 @@ const (
 	VisualBlock
 )
 
+// visualStepRight advances one visual l step: onto the past-end newline
+// position once, otherwise one character right. It reports progress.
+func (e *Editor) visualStepRight() bool {
+	_, le, _, _ := e.lineAt(e.cursor)
+	if e.visualKind != VisualBlock && e.cursor >= le-1 && le < len(e.text) && e.text[le] == '\n' {
+		if e.cursor >= le {
+			return false
+		}
+		e.visAtEOL = true
+		e.cursor = le
+		return true
+	}
+	before := e.cursor
+	e.visAtEOL = false
+	if e.visualKind == VisualBlock {
+		e.visBlockAtEOL = false
+	}
+	p, _ := e.move('l', 1)
+	e.setVisualCursor(p)
+	return e.cursor != before
+}
+
 func (e *Editor) enterVisual(kind VisualKind) {
 	n := e.count
 	e.clearPendingState()
@@ -19,7 +41,6 @@ func (e *Editor) enterVisual(kind VisualKind) {
 	e.visAtEOL = false
 	e.visBlockAtEOL = false
 	e.mode = ModeVisual
-	e.visualKind = kind
 	e.visAnchor = e.cursor
 	if len(e.text) > 0 && e.cursor >= len(e.text) {
 		e.cursor = len(e.text) - 1
@@ -27,25 +48,49 @@ func (e *Editor) enterVisual(kind VisualKind) {
 	}
 	e.visBlockAnchorCol = e.cursorColumn(e.visAnchor)
 	e.visBlockCursorCol = e.visBlockAnchorCol
-	if n > 1 {
-		switch kind {
-		case VisualChar:
-			p := e.cursor
-			for i := 1; i < n && p < len(e.text); i++ {
-				p = e.nextGrapheme(p)
-			}
-			e.setVisualCursor(p)
-		case VisualLine:
-			lines := e.lineBounds()
-			li := e.lineIndexAt(lines, e.cursor) + n - 1
-			if li >= len(lines) {
-				li = len(lines) - 1
-			}
-			e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
-		case VisualBlock:
-			e.visBlockCursorCol = e.visBlockAnchorCol + n - 1
-			e.placeAtColumn(e.cursor, e.visBlockCursorCol)
+	useOp := n > 0 && e.hasLastVisOp
+	if useOp {
+		kind = e.lastVisOpKind
+	}
+	e.visualKind = kind
+	if n <= 0 {
+		return
+	}
+	switch kind {
+	case VisualChar:
+		span := n
+		if useOp {
+			span = e.lastVisOpSpan * n
 		}
+		for i := 1; i < span; i++ {
+			if !e.visualStepRight() {
+				break
+			}
+		}
+	case VisualLine:
+		rows := n
+		if useOp {
+			rows = e.lastVisOpRows * n
+		}
+		lines := e.lineBounds()
+		li := e.lineIndexAt(lines, e.cursor) + rows - 1
+		if li >= len(lines) {
+			li = len(lines) - 1
+		}
+		e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
+	case VisualBlock:
+		span, rows := n, 1
+		if useOp {
+			span, rows = e.lastVisOpSpan*n, e.lastVisOpRows*n
+		}
+		lines := e.lineBounds()
+		li := e.lineIndexAt(lines, e.cursor) + rows - 1
+		if li >= len(lines) {
+			li = len(lines) - 1
+		}
+		e.cursor = lines[li][0]
+		e.visBlockCursorCol = e.visBlockAnchorCol + span - 1
+		e.placeAtColumn(e.cursor, e.visBlockCursorCol)
 	}
 }
 
@@ -360,7 +405,6 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		}
 		return true
 	case '$':
-		_, le, _, _ := e.lineAt(e.cursor)
 		if e.visualKind == VisualBlock {
 			e.visBlockAtEOL = true
 			e.visAtEOL = false
@@ -371,11 +415,17 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 			return true
 		}
 		// Charwise/linewise: sit on the newline (past last char) when one exists.
+		lines := e.lineBounds()
+		li := e.lineIndexAt(lines, e.cursor) + count - 1
+		if li >= len(lines) {
+			li = len(lines) - 1
+		}
+		le := lines[li][1]
 		if le < len(e.text) {
 			e.cursor = le
 			e.visAtEOL = true
 		} else {
-			p, _ := e.move('$', count)
+			p, _ := e.move('$', 1)
 			e.cursor = e.clampPos(p)
 			e.visAtEOL = false
 		}
@@ -391,6 +441,10 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 				e.cursor = ls
 			}
 			e.visBlockCursorCol = e.cursorColumn(e.cursor)
+			for i := 1; i < count; i++ {
+				p, _ := e.move('h', 1)
+				e.setVisualCursor(p)
+			}
 			return true
 		}
 		e.visAtEOL = false
@@ -399,18 +453,11 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		e.setVisualCursor(p)
 		return true
 	case 'l', ' ':
-		_, le, _, _ := e.lineAt(e.cursor)
-		if e.visualKind != VisualBlock && e.cursor >= le-1 && le < len(e.text) && e.text[le] == '\n' {
-			e.visAtEOL = true
-			e.cursor = le
-			return true
+		for i := 0; i < count; i++ {
+			if !e.visualStepRight() {
+				break
+			}
 		}
-		e.visAtEOL = false
-		if e.visualKind == VisualBlock {
-			e.visBlockAtEOL = false
-		}
-		p, _ := e.move('l', count)
-		e.setVisualCursor(p)
 		return true
 	}
 	e.visAtEOL = false
@@ -418,7 +465,7 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		e.visBlockAtEOL = false
 	}
 	p, ok := e.move(m, count)
-	if !ok && m != 'l' && m != 'h' && m != ' ' {
+	if !ok {
 		return false
 	}
 	e.setVisualCursor(p)
@@ -476,6 +523,30 @@ func (e *Editor) visualTextObject(around bool, obj rune, count int) bool {
 func (e *Editor) operateVisual(op rune) {
 	kind := e.visualKind
 	e.rememberVisual()
+	switch kind {
+	case VisualChar:
+		if s, en, ok := e.visualCharSpan(); ok {
+			e.hasLastVisOp = true
+			e.lastVisOpKind = kind
+			e.lastVisOpSpan = en - s + 1
+			e.lastVisOpRows = 1
+		}
+	case VisualLine:
+		if _, _, first, last, ok := e.visualLineSpan(); ok {
+			e.hasLastVisOp = true
+			e.lastVisOpKind = kind
+			e.lastVisOpSpan = 1
+			e.lastVisOpRows = last - first + 1
+		}
+	case VisualBlock:
+		if cells := e.visualBlockCells(); len(cells) > 0 {
+			c1, c2 := e.visualBlockCols()
+			e.hasLastVisOp = true
+			e.lastVisOpKind = kind
+			e.lastVisOpSpan = c2 - c1 + 1
+			e.lastVisOpRows = len(cells)
+		}
+	}
 
 	switch op {
 	case 'd', 'c', 'y':
@@ -545,14 +616,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 		e.mode = ModeNormal
 		c1, c2 := e.visualBlockCols()
 		width := c2 - c1 + 1
-		first := -1
-		for i, c := range cells {
-			if !c.pad {
-				first = i
-				break
-			}
-		}
-		if first < 0 {
+		if len(cells) == 0 {
 			e.normalCursorClamp()
 			return
 		}
@@ -561,7 +625,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 		if op == 'y' {
 			e.reg = reg
 			e.regLinewise = false
-			e.cursor = cells[first].start
+			e.cursor = cells[0].start
 			e.normalCursorClamp()
 			return
 		}
@@ -569,11 +633,12 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 		// Delete bottom-up so offsets stay valid.
 		for i := len(cells) - 1; i >= 0; i-- {
 			c := cells[i]
+			e.relocateMarksForDelete(c.start, c.end)
 			e.text = append(e.text[:c.start], e.text[c.end:]...)
 		}
 		e.reg = reg
 		e.regLinewise = false
-		e.cursor = cells[first].start
+		e.cursor = cells[0].start
 		if e.cursor > len(e.text) {
 			e.cursor = len(e.text)
 		}
@@ -582,7 +647,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 			// change replication when insert ends.
 			e.beginChange('c', len(cells))
 			e.changeBlockWidth = width
-			for i := first + 1; i < len(cells); i++ {
+			for i := 1; i < len(cells); i++ {
 				c := cells[i]
 				if c.pad {
 					continue
@@ -607,13 +672,11 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 				ed.regLinewise = false
 				for i := len(blk) - 1; i >= 0; i-- {
 					c := blk[i]
+					ed.relocateMarksForDelete(c.start, c.end)
 					ed.text = append(ed.text[:c.start], ed.text[c.end:]...)
 				}
-				for _, c := range blk {
-					if !c.pad {
-						ed.cursor = c.start
-						break
-					}
+				if len(blk) > 0 {
+					ed.cursor = blk[0].start
 				}
 				ed.normalCursorClamp()
 			}
@@ -1031,6 +1094,7 @@ func (e *Editor) feedVisual(key string) Action {
 		return ActCancel
 	case "enter":
 		e.count = 0
+		e.exitVisual(true)
 		return ActAccept
 	}
 	e.count = 0

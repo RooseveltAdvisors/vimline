@@ -133,6 +133,10 @@ type Editor struct {
 	lastVisualCursor         int
 	lastVisualBlockAnchorCol int
 	lastVisualBlockCursorCol int
+	hasLastVisOp             bool
+	lastVisOpKind            VisualKind
+	lastVisOpSpan            int
+	lastVisOpRows            int
 	pendingGV                bool     // bare g in Normal; next v reselects
 	visAtEOL                 bool     // charwise selection includes trailing newline
 	visBlockAtEOL            bool     // blockwise $: each line extends through its EOL
@@ -1293,6 +1297,16 @@ func (e *Editor) deleteRange(a, b int) {
 		}
 	}
 	e.regLinewise = false
+	e.relocateMarksForDelete(a, b)
+	out := make([]rune, 0, len(e.text)-(b-a))
+	out = append(out, e.text[:a]...)
+	out = append(out, e.text[b:]...)
+	e.text = out
+	e.cursor = a
+	e.clamp()
+}
+
+func (e *Editor) relocateMarksForDelete(a, b int) {
 	lineStart, _, _, _ := e.lineAt(a)
 	prefix := a - lineStart
 	for name, m := range e.marks {
@@ -1305,12 +1319,6 @@ func (e *Editor) deleteRange(a, b int) {
 		}
 		e.marks[name] = nm
 	}
-	out := make([]rune, 0, len(e.text)-(b-a))
-	out = append(out, e.text[:a]...)
-	out = append(out, e.text[b:]...)
-	e.text = out
-	e.cursor = a
-	e.clamp()
 }
 
 func (e *Editor) deleteRangeNoRegister(a, b int) {
@@ -1618,6 +1626,7 @@ func (e *Editor) endChange() {
 				ed.regLinewise = false
 				for i := len(cells) - 1; i >= 0; i-- {
 					c := cells[i]
+					ed.relocateMarksForDelete(c.start, c.end)
 					ed.text = append(ed.text[:c.start], ed.text[c.end:]...)
 					if c.pad {
 						continue

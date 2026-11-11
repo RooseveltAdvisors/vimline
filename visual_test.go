@@ -1,26 +1,12 @@
 package vimline
 
 import (
-	"strings"
 	"testing"
 )
 
 func feedVisualSeq(e *Editor, seq string) {
-	seq = strings.NewReplacer("<C-v>", "\x16", "<c-v>", "\x16").Replace(seq)
 	for _, key := range splitOracleKeys(seq) {
-		switch key {
-		case "\x1b":
-			key = "esc"
-		case "\x16":
-			key = "ctrl-v"
-		case "\x12":
-			key = "ctrl-r"
-		case "\x08":
-			key = "bs"
-		case "\r":
-			key = "enter"
-		}
-		e.Feed(key)
+		e.Feed(oracleKeyName(key))
 	}
 }
 
@@ -519,5 +505,81 @@ func TestVisualCountedEntryExtent(t *testing.T) {
 	feedVisualSeq(e, "2<C-v>jd")
 	if e.Text() != "cd\ngh" || e.Register() != "ab\nef" {
 		t.Fatalf("blockwise text=%q reg=%q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualCountedStepsStopAtLineEnd(t *testing.T) {
+	e := newVisualAt("abc\ndef", 1)
+	feedVisualSeq(e, "v2ld")
+	if e.Text() != "adef" || e.Register() != "bc\n" {
+		t.Fatalf("counted l text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abc\ndef", 0)
+	feedVisualSeq(e, "5vd")
+	if e.Text() != "def" || e.Register() != "abc\n" {
+		t.Fatalf("entry steps text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abc\ndef\nghi", 0)
+	feedVisualSeq(e, "v2$y")
+	if e.Register() != "abc\ndef\n" {
+		t.Fatalf("counted dollar reg=%q", e.Register())
+	}
+	e = newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>j$2hd")
+	if e.Text() != "d\nh" || e.Register() != "abc\nefg" {
+		t.Fatalf("block dollar-h text=%q reg=%q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualCountedEntryRepeatsLastOperation(t *testing.T) {
+	e := newVisualAt("abcdefghijkl", 0)
+	feedVisualSeq(e, "3vdl2vd")
+	if e.Text() != "dkl" || e.Register() != "efghij" {
+		t.Fatalf("charwise repeat text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcd\nefgh\nijkl\nmnop\nqrst\nuvwx", 0)
+	feedVisualSeq(e, "<C-v>jlyjjl2<C-v>d")
+	if e.Text() != "abcd\nefgh\ni\nm\nq\nu" || e.Register() != "jkl\nnop\nrst\nvwx" {
+		t.Fatalf("block repeat text=%q reg=%q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualBlockOperatorAnchorsAtTopRow(t *testing.T) {
+	e := newVisualAt("ab\nlongish", 8)
+	feedVisualSeq(e, "<C-v>kcXY<esc>")
+	if e.Text() != "abXY\nlongiXYh" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	e = newVisualAt("ab\nlongish", 8)
+	feedVisualSeq(e, "<C-v>ky")
+	if e.Cursor() != 1 {
+		t.Fatalf("cursor = %d want 1", e.Cursor())
+	}
+}
+
+func TestBlockwiseDeleteRelocatesMarks(t *testing.T) {
+	e := newVisualAt("abcd\nefgh", 6)
+	feedVisualSeq(e, "mak0<C-v>jd`a")
+	if e.Text() != "bcd\nfgh" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Cursor() != 5 {
+		t.Fatalf("cursor = %d want 5", e.Cursor())
+	}
+}
+
+func TestVisualEnterExitsBeforeAccept(t *testing.T) {
+	e := newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "vll")
+	if e.Mode() != ModeVisual {
+		t.Fatalf("mode = %v", e.Mode())
+	}
+	feedVisualSeq(e, "<cr>")
+	if e.Mode() != ModeNormal {
+		t.Fatalf("mode after enter = %v", e.Mode())
+	}
+	feedVisualSeq(e, "d")
+	if e.Text() != "abcdef" {
+		t.Fatalf("enter then d must not delete a prior visual span: %q", e.Text())
 	}
 }

@@ -27,12 +27,6 @@ type oracleResult struct {
 }
 
 func TestNeovimDifferentialV031Acceptance(t *testing.T) {
-	if _, err := exec.LookPath("nvim"); err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("nvim is required in CI so the live differential gates the suite")
-		}
-		t.Skip("nvim is not installed; deterministic oracle regressions still run")
-	}
 	cases := []oracleCase{
 		{Name: "cw dot", Text: "one (a (b) c)", Pos: 0, Keys: splitOracleKeys("cwQQ<esc>.")},
 		{Name: "operator underscore", Text: "one (two)\nthree four\n\nfive", Pos: 6, Keys: splitOracleKeys("d_")},
@@ -221,6 +215,17 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 		{Name: "dot repeat dj register pastes lines", Text: "abcd\nx\nyz\nw\nq", Pos: 3, Keys: splitOracleKeys("dj.p")},
 		{Name: "dot repeat dk register", Text: "a\nb\nc\nd", Pos: 6, Keys: splitOracleKeys("dk.")},
 	}
+	runOracleDifferential(t, cases, false)
+}
+
+func runOracleDifferential(t *testing.T, cases []oracleCase, visual bool) {
+	t.Helper()
+	if _, err := exec.LookPath("nvim"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("nvim is required in CI so the live differential gates the suite")
+		}
+		t.Skip("nvim is not installed; deterministic oracle regressions still run")
+	}
 	for i := range cases {
 		before := []rune(cases[i].Text)[:cases[i].Pos]
 		prefix := string(before)
@@ -230,7 +235,11 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 			linePrefix = prefix[at+1:]
 		}
 		cases[i].Col = len([]byte(linePrefix))
-		cases[i].Seq = strings.Join(cases[i].Keys, "")
+		if visual {
+			cases[i].Seq = visualOracleSeq(cases[i].Keys)
+		} else {
+			cases[i].Seq = strings.Join(cases[i].Keys, "")
+		}
 	}
 
 	dir := t.TempDir()
@@ -243,6 +252,10 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 	if err := os.WriteFile(inPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	apply := "  vim.cmd('normal! ' .. c.seq)"
+	if visual {
+		apply = "  vim.fn.feedkeys(vim.api.nvim_replace_termcodes(c.seq, true, false, true), 'x')"
+	}
 	lua := `
 local input = os.getenv('VIMLINE_ORACLE_INPUT')
 local output = os.getenv('VIMLINE_ORACLE_OUTPUT')
@@ -254,7 +267,7 @@ for _, c in ipairs(cases) do
   vim.fn.setreg('"', '')
   vim.cmd('set undolevels=-1')
   vim.cmd('set undolevels=1000')
-  vim.cmd('normal! ' .. c.seq)
+` + apply + `
   local cursor = vim.api.nvim_win_get_cursor(0)
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   local pos = 0
@@ -293,17 +306,7 @@ vim.cmd('qa!')
 			e.SetMode(ModeNormal)
 			e.SetCursor(tc.Pos)
 			for _, key := range tc.Keys {
-				switch key {
-				case "\x1b":
-					key = "esc"
-				case "\x12":
-					key = "ctrl-r"
-				case "\x08":
-					key = "bs"
-				case "\r":
-					key = "enter"
-				}
-				e.Feed(key)
+				e.Feed(oracleKeyName(key))
 			}
 			want := results[i]
 			if e.Text() != want.Text || e.Cursor() != want.Pos || e.Register() != want.Reg {
@@ -315,6 +318,30 @@ vim.cmd('qa!')
 }
 
 func splitOracleKeys(seq string) []string {
-	replacer := strings.NewReplacer("<esc>", "\x1b", "<ctrl-r>", "\x12", "<bs>", "\x08", "<cr>", "\r")
+	replacer := strings.NewReplacer(
+		"<esc>", "\x1b",
+		"<Esc>", "\x1b",
+		"<ctrl-r>", "\x12",
+		"<C-v>", "\x16",
+		"<c-v>", "\x16",
+		"<bs>", "\x08",
+		"<cr>", "\r",
+	)
 	return strings.Split(replacer.Replace(seq), "")
+}
+
+func oracleKeyName(key string) string {
+	switch key {
+	case "\x1b":
+		return "esc"
+	case "\x16":
+		return "ctrl-v"
+	case "\x12":
+		return "ctrl-r"
+	case "\x08":
+		return "bs"
+	case "\r":
+		return "enter"
+	}
+	return key
 }
