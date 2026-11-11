@@ -65,17 +65,21 @@ func (e *Editor) enterVisual(kind VisualKind) {
 			if li >= len(lines) {
 				li = len(lines) - 1
 			}
-			e.placeAtColumn(lines[li][0], e.lastVisOpSpan)
+			e.visualPlaceAtColumn(lines[li][0], e.lastVisOpSpan)
 			break
 		}
 		span := n
 		if useOp {
 			span = e.lastVisOpSpan * n
 		}
+		from := e.cursor
 		for i := 1; i < span; i++ {
 			if !e.visualStepRight() {
 				break
 			}
+		}
+		if e.cursor != from {
+			e.commitCurswant()
 		}
 	case VisualLine:
 		rows := n
@@ -87,7 +91,7 @@ func (e *Editor) enterVisual(kind VisualKind) {
 		if li >= len(lines) {
 			li = len(lines) - 1
 		}
-		e.placeAtColumn(lines[li][0], e.cursorColumn(e.cursor))
+		e.visualPlaceAtColumn(lines[li][0], e.curswant)
 	case VisualBlock:
 		span, rows := n, 1
 		if useOp {
@@ -100,7 +104,7 @@ func (e *Editor) enterVisual(kind VisualKind) {
 		}
 		e.cursor = lines[li][0]
 		e.visBlockCursorCol = e.visBlockAnchorCol + span - 1
-		e.placeAtColumn(e.cursor, e.visBlockCursorCol)
+		e.visualPlaceAtColumn(e.cursor, e.visBlockCursorCol)
 	}
 }
 
@@ -392,7 +396,7 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		count = 1
 	}
 	switch m {
-	case 'j', '+':
+	case 'j':
 		e.visAtEOL = false
 		lines := e.lineBounds()
 		idx := e.lineIndexAt(lines, e.cursor)
@@ -404,13 +408,13 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		if idx >= len(lines) {
 			idx = len(lines) - 1
 		}
-		e.placeAtColumn(lines[idx][0], col)
+		e.visualPlaceAtColumn(lines[idx][0], col)
 		// Keep the virtual block column even when the line is shorter.
 		if e.visualKind == VisualBlock {
 			e.visBlockCursorCol = col
 		}
 		return true
-	case 'k', '-':
+	case 'k':
 		e.visAtEOL = false
 		lines := e.lineBounds()
 		idx := e.lineIndexAt(lines, e.cursor)
@@ -422,10 +426,33 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		if idx < 0 {
 			idx = 0
 		}
-		e.placeAtColumn(lines[idx][0], col)
+		e.visualPlaceAtColumn(lines[idx][0], col)
 		if e.visualKind == VisualBlock {
 			e.visBlockCursorCol = col
 		}
+		return true
+	case '+', '-':
+		e.visAtEOL = false
+		lines := e.lineBounds()
+		idx := e.lineIndexAt(lines, e.cursor)
+		target := idx + count
+		if m == '-' {
+			target = idx - count
+		}
+		if target >= len(lines) {
+			target = len(lines) - 1
+		}
+		if target < 0 {
+			target = 0
+		}
+		if target == idx {
+			return false
+		}
+		p := lines[target][0]
+		for p < lines[target][1] && isSpaceNotNL(e.text[p]) {
+			p++
+		}
+		e.setVisualCursor(p)
 		return true
 	case '$':
 		if e.visualKind == VisualBlock {
@@ -484,7 +511,7 @@ func (e *Editor) visualMotion(m rune, count int) bool {
 		return true
 	}
 	e.visAtEOL = false
-	if e.visualKind == VisualBlock && m != 'j' && m != 'k' && m != '+' && m != '-' {
+	if e.visualKind == VisualBlock && m != 'j' && m != 'k' {
 		e.visBlockAtEOL = false
 	}
 	p, ok := e.move(m, count)
@@ -643,6 +670,7 @@ func (e *Editor) operateVisual(op rune, count int) {
 	case 'J':
 		e.operateVisualJoin()
 	}
+	e.commitCurswant()
 }
 
 func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
@@ -653,7 +681,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 			e.exitVisual(false)
 			return
 		}
-		col := e.cursorColumn(e.cursor)
+		col := e.curswant
 		e.mode = ModeNormal
 		if op == 'y' {
 			e.operateLinewiseSpan('y', start, end, spanLinewise)
@@ -682,7 +710,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 				if to+1 < len(lines) {
 					end = lines[to+1][0]
 				}
-				column := ed.cursorColumn(ed.cursor)
+				column := ed.curswant
 				ed.operateLinewiseSpan('d', lines[li][0], end, spanLinewise)
 				ed.placeAtColumn(ed.cursor, column)
 				ed.normalCursorClamp()
@@ -961,8 +989,13 @@ func (e *Editor) feedVisual(key string) Action {
 		e.count = 0
 		return ActCancel
 	}
-	if e.pending == 'r' || e.pending == '/' || e.pending == '?' {
-		if e.pending == 'r' || key == "enter" || key == "esc" {
+	switch e.pending {
+	case 'r', 'm', '`', '\'', '[', ']':
+		e.pending = 0
+		e.count = 0
+		return ActStay
+	case '/', '?':
+		if key == "enter" || key == "esc" {
 			e.pending = 0
 		}
 		e.count = 0
@@ -993,7 +1026,9 @@ func (e *Editor) feedVisual(key string) Action {
 			return ActStay
 		}
 		if obj, ok := e.printable(key); ok {
-			e.visualTextObject(around, obj, e.takeCount())
+			if e.visualTextObject(around, obj, e.takeCount()) {
+				e.commitCurswant()
+			}
 		}
 		e.count = 0
 		return ActStay
@@ -1038,7 +1073,7 @@ func (e *Editor) feedVisual(key string) Action {
 				if e.visualKind != VisualBlock {
 					col = e.curswant
 				}
-				e.placeAtColumn(lines[li][0], col)
+				e.visualPlaceAtColumn(lines[li][0], col)
 				if e.visualKind == VisualBlock {
 					e.visBlockCursorCol = col
 				}
@@ -1069,6 +1104,7 @@ func (e *Editor) feedVisual(key string) Action {
 		case 'o':
 			e.count = 0
 			e.swapVisualEnds()
+			e.commitCurswant()
 			return ActStay
 		case 'O':
 			e.count = 0
@@ -1077,6 +1113,7 @@ func (e *Editor) feedVisual(key string) Action {
 			} else {
 				e.swapVisualEnds()
 			}
+			e.commitCurswant()
 			return ActStay
 		case 'h', 'l', 'j', 'k', 'w', 'W', 'b', 'B', 'e', 'E', '0', '^', '_', '$', ' ', '|', '+', '-', '(', ')', '{', '}':
 			e.visualMotion(r, e.takeCount())
@@ -1122,8 +1159,8 @@ func (e *Editor) feedVisual(key string) Action {
 		case 'p', 'P', 'n', 'N':
 			e.count = 0
 			return ActStay
-		case 'r':
-			e.pending = 'r'
+		case 'r', 'm', '`', '\'', '[', ']':
+			e.pending = r
 			return ActStay
 		case '/', '?':
 			e.pending = r
@@ -1144,7 +1181,7 @@ func (e *Editor) feedVisual(key string) Action {
 			if e.visualKind != VisualBlock {
 				col = e.curswant
 			}
-			e.placeAtColumn(lines[li][0], col)
+			e.visualPlaceAtColumn(lines[li][0], col)
 			if e.visualKind == VisualBlock {
 				e.visBlockCursorCol = col
 			}
@@ -1187,10 +1224,12 @@ func (e *Editor) feedVisual(key string) Action {
 	case "ctrl-c":
 		e.count = 0
 		e.exitVisual(true)
+		e.commitCurswant()
 		return ActCancel
 	case "enter":
 		e.count = 0
 		e.exitVisual(true)
+		e.commitCurswant()
 		return ActAccept
 	}
 	e.count = 0

@@ -812,6 +812,20 @@ func TestVisualGapKeysDiscardOperands(t *testing.T) {
 	if e.Mode() != ModeVisual {
 		t.Fatalf("mode = %v", e.Mode())
 	}
+	for _, key := range []string{"m", "`", "'", "[", "]"} {
+		e := newVisualAt("abcd", 0)
+		feedVisualSeq(e, "v"+key+"x")
+		if e.Text() != "abcd" {
+			t.Fatalf("gap %q operand ran as a command: %q", key, e.Text())
+		}
+		if e.Mode() != ModeVisual {
+			t.Fatalf("gap %q left mode = %v", key, e.Mode())
+		}
+		feedVisualSeq(e, "y")
+		if e.Register() != "a" {
+			t.Fatalf("later key misrouted after gap %q: reg %q", key, e.Register())
+		}
+	}
 }
 
 func TestVisualGapPendingCtrlCCancels(t *testing.T) {
@@ -859,6 +873,15 @@ func TestVisualGapPendingCtrlCCancels(t *testing.T) {
 	feedVisualSeq(e, "x")
 	if e.Text() != "bcd" {
 		t.Fatalf("g pending ctrl-c poisoned later keys: %q", e.Text())
+	}
+	e = newVisualAt("abcd", 0)
+	feedVisualSeq(e, "vm")
+	if a := e.Feed("ctrl-c"); a != ActCancel {
+		t.Fatalf("mark pending ctrl-c action = %v want ActCancel", a)
+	}
+	feedVisualSeq(e, "x")
+	if e.Text() != "bcd" {
+		t.Fatalf("mark pending ctrl-c poisoned later keys: %q", e.Text())
 	}
 }
 
@@ -957,7 +980,7 @@ func TestGVReselectOnlyImmediatePair(t *testing.T) {
 		t.Fatalf("mode = %v", e.Mode())
 	}
 	v := e.View("/", true)
-	if !v.SelActive || v.SelStart != 0 {
-		t.Fatalf("g2v selection = %+v want fresh at 0", v)
+	if !v.SelActive || v.SelStart != 0 || v.SelEnd != 1 {
+		t.Fatalf("g2v selection = %+v want fresh at 0..1", v)
 	}
 }

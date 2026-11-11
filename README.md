@@ -59,8 +59,9 @@ joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
 charwise put of multi-line text leaves the cursor at the end of the put where
 nvim leaves it at the start; and `>>` places the cursor in column 0 where nvim
 keeps the virtual column (tabs are one rune here). Visual mode does not
-implement `p`, `P`, `r`, `/?` search, or `n`/`N`; those keys are ignored and
-their operands are discarded so later keys are not misread. A text object
+implement `p`, `P`, `r`, `/?` search, `n`/`N`, `ctrl-d`/`ctrl-u`, or mark jumps
+(`m`, `` ` ``, `'`, `[`, `]`); those keys are ignored and their operands are
+discarded so later keys are not misread. A text object
 with a charwise or linewise live selection extends word objects from the
 cursor end like nvim; quote, bracket, sentence, and paragraph objects keep
 the object span where nvim extends by its per-object rules (probed live:

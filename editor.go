@@ -206,12 +206,17 @@ func (e *Editor) SetCursor(p int) {
 	e.curswant = e.cursorColumn(e.cursor)
 }
 
+func (e *Editor) commitCurswant() {
+	e.curswant = e.cursorColumn(e.cursor)
+}
+
 // InsertLiteral inserts literal runes at the cursor while preserving undo history.
 func (e *Editor) InsertLiteral(s string) {
 	if s == "" {
 		return
 	}
 	e.insertRunes([]rune(s))
+	e.commitCurswant()
 }
 
 // Cursor returns the current cursor offset.
@@ -230,6 +235,7 @@ func (e *Editor) FlushJ() {
 	}
 	e.pendingJ = false
 	e.insertRunes([]rune{'j'})
+	e.commitCurswant()
 }
 
 func (e *Editor) pushUndo() {
@@ -506,7 +512,7 @@ func (e *Editor) operatePercent(op rune, percent int) {
 	lines := e.lineBounds()
 	cur := e.lineIndexAt(lines, e.cursor)
 	tgt := e.lineIndexAt(lines, target)
-	column := e.cursorColumn(e.cursor)
+	column := e.curswant
 	cs, ce, ds, de, _ := e.lineSpanDelta(e.cursor, tgt-cur)
 	reg := e.linewiseRegister(cs, ce)
 	switch op {
@@ -523,6 +529,7 @@ func (e *Editor) operatePercent(op rune, percent int) {
 		e.beginChange('L', 1)
 		e.mode = ModeInsert
 	}
+	e.commitCurswant()
 }
 
 func (e *Editor) operateIndent(op, motion rune, count, levels int) {
@@ -642,6 +649,37 @@ func (e *Editor) placeAtColumn(at, column int) {
 	e.cursor = ls + column
 	if e.cursor >= le {
 		e.cursor = le - 1
+	}
+}
+
+// visualPlaceAtColumn lands a visual motion at the desired column like nvim:
+// on a shorter line the cursor rests on the newline.
+func (e *Editor) visualPlaceAtColumn(at, column int) {
+	if len(e.text) == 0 {
+		e.cursor = 0
+		return
+	}
+	if at >= len(e.text) {
+		if e.text[len(e.text)-1] == '\n' {
+			e.cursor = len(e.text)
+			return
+		}
+		at = len(e.text) - 1
+	}
+	if at < 0 {
+		at = 0
+	}
+	ls, le, _, _ := e.lineAt(at)
+	if le == ls {
+		e.cursor = ls
+		return
+	}
+	e.cursor = ls + column
+	if e.cursor > le {
+		e.cursor = le
+	}
+	if e.cursor >= len(e.text) {
+		e.cursor = len(e.text) - 1
 	}
 }
 
@@ -1228,7 +1266,7 @@ func (e *Editor) operateLinewiseSpan(op rune, start, end int, kind spanKind) {
 		e.regKind = regLinewise
 		e.cursor = start
 	case 'd':
-		column := e.cursorColumn(e.cursor)
+		column := e.curswant
 		delStart, delEnd := ls, contentEnd
 		if contentEnd < len(e.text) {
 			delEnd = contentEnd + 1
@@ -1844,6 +1882,7 @@ func (e *Editor) operateMotionSpan(op rune, count int, span func(*Editor, int) (
 		}
 		e.mode = ModeInsert
 	}
+	e.commitCurswant()
 }
 
 func (e *Editor) operateFind(op, kind, ch rune, count int, isRepeat bool) {
@@ -1883,6 +1922,7 @@ func (e *Editor) operateFind(op, kind, ch rune, count int, isRepeat bool) {
 		e.changeRepeat = isRepeat
 		e.mode = ModeInsert
 	}
+	e.commitCurswant()
 }
 
 func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
@@ -1980,7 +2020,7 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 		}
 		e.cursor = s
 	case 'd':
-		column := e.cursorColumn(e.cursor)
+		column := e.curswant
 		linewiseRegister := append([]rune(nil), e.text[s:en]...)
 		deleteStart := s
 		if obj == 'p' {
@@ -2061,6 +2101,7 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 		e.changeAround = around
 		e.mode = ModeInsert
 	}
+	e.commitCurswant()
 }
 
 func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
@@ -2073,7 +2114,7 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 		if explicitCount {
 			targetLine = min(count-1, len(lines)-1)
 		}
-		column := e.cursorColumn(e.cursor)
+		column := e.curswant
 		cs, ce, ds, de, _ := e.lineSpanDelta(e.cursor, targetLine-curLine)
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
@@ -2095,7 +2136,7 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 				}
 				_, _, a, b, _ := ed.lineSpanDelta(ed.cursor, tgt-cl)
 				ed.deleteRange(a, b)
-				ed.placeAtColumn(a, column)
+				ed.placeAtColumn(a, ed.curswant)
 			}
 		case 'c':
 			originalCursor := e.cursor
@@ -2116,6 +2157,7 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 			e.redoCursor = cs
 			e.mode = ModeInsert
 		}
+		e.commitCurswant()
 	case 'e', 'E':
 		// dge / dgE: backward to end of previous word (inclusive of start char in Vim!).
 		start := e.cursor
@@ -2151,6 +2193,7 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 			e.changeObj = sub
 			e.changeFrom = insStart
 		}
+		e.commitCurswant()
 	case '_':
 		// dg_ / cg_ / yg_: through last non-blank character on line (inclusive!).
 		start := e.cursor
@@ -2180,6 +2223,7 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 		} else if op == 'c' {
 			e.beginChange('$', 1)
 		}
+		e.commitCurswant()
 	}
 }
 
@@ -2193,7 +2237,7 @@ func (e *Editor) operate(op, m rune, count int) {
 		if !ok {
 			return
 		}
-		column := e.cursorColumn(e.cursor)
+		column := e.curswant
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
 		case 'y':
@@ -2212,7 +2256,7 @@ func (e *Editor) operate(op, m rune, count int) {
 				}
 				// The column comes from the cursor at repeat time, not from
 				// the first delete.
-				column := ed.cursorColumn(ed.cursor)
+				column := ed.curswant
 				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
 				ed.reg = lineReg
@@ -2235,13 +2279,14 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.beginChange('L', 1)
 			e.mode = ModeInsert
 		}
+		e.commitCurswant()
 		return
 	}
 	if m == 'G' {
 		lines := e.lineBounds()
 		curLine := e.lineIndexAt(lines, e.cursor)
 		targetLine := len(lines) - 1
-		column := e.cursorColumn(e.cursor)
+		column := e.curswant
 		cs, ce, ds, de, _ := e.lineSpanDelta(e.cursor, targetLine-curLine)
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
@@ -2257,7 +2302,7 @@ func (e *Editor) operate(op, m rune, count int) {
 				ls := ed.lineBounds()
 				cl := ed.lineIndexAt(ls, ed.cursor)
 				cs, ce, a, b, _ := ed.lineSpanDelta(ed.cursor, (len(ls)-1)-cl)
-				column := ed.cursorColumn(ed.cursor)
+				column := ed.curswant
 				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
 				ed.reg = lineReg
@@ -2283,6 +2328,7 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.redoCursor = cs
 			e.mode = ModeInsert
 		}
+		e.commitCurswant()
 		return
 	}
 	if m == ';' || m == ',' {
@@ -2312,7 +2358,7 @@ func (e *Editor) operate(op, m rune, count int) {
 		if !ok {
 			return
 		}
-		column := e.cursorColumn(e.cursor)
+		column := e.curswant
 		lineReg := e.linewiseRegister(cs, ce)
 		switch op {
 		case 'y':
@@ -2331,7 +2377,7 @@ func (e *Editor) operate(op, m rune, count int) {
 				}
 				// The column comes from the cursor at repeat time, not from
 				// the first delete.
-				column := ed.cursorColumn(ed.cursor)
+				column := ed.curswant
 				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
 				ed.reg = lineReg
@@ -2346,6 +2392,7 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.beginChange('L', 1)
 			e.mode = ModeInsert
 		}
+		e.commitCurswant()
 		return
 	}
 	originalMotion := m
@@ -2420,6 +2467,7 @@ func (e *Editor) operate(op, m rune, count int) {
 			e.regKind = regCharwise
 			e.beginChange(originalMotion, count)
 			e.mode = ModeInsert
+			e.commitCurswant()
 			return
 		}
 		if kind != spanCharwise {
@@ -2430,6 +2478,7 @@ func (e *Editor) operate(op, m rune, count int) {
 		e.beginChange(originalMotion, count)
 		e.mode = ModeInsert
 	}
+	e.commitCurswant()
 }
 
 func (e *Editor) paste(before bool, count int) {
@@ -2508,6 +2557,7 @@ func (e *Editor) paste(before bool, count int) {
 		}
 		e.cursor = e.lineBounds()[cursorRow][0] + col
 		e.clamp()
+		e.commitCurswant()
 		return
 	}
 	if e.regKind == regLinewise {
@@ -2553,6 +2603,7 @@ func (e *Editor) paste(before bool, count int) {
 			e.cursor++
 		}
 		e.normalCursorClamp()
+		e.commitCurswant()
 		return
 	}
 	at := e.cursor
@@ -2570,6 +2621,7 @@ func (e *Editor) paste(before bool, count int) {
 	e.text = out
 	e.cursor = at + len(insert) - 1
 	e.clamp()
+	e.commitCurswant()
 }
 
 func (e *Editor) deleteChar(before bool) {
@@ -2626,6 +2678,7 @@ func (e *Editor) replaceChars(r rune, count int) {
 	}, true)
 	e.cursor = last
 	e.normalCursorClamp()
+	e.commitCurswant()
 }
 
 func (e *Editor) toggleCases(count int) {
@@ -2652,6 +2705,7 @@ func (e *Editor) toggleCases(count int) {
 	} else {
 		e.cursor = last
 	}
+	e.commitCurswant()
 }
 
 func (e *Editor) undoEdit() {
@@ -2717,7 +2771,7 @@ func (e *Editor) totalOpCount() int {
 
 func visualVerticalKey(key string) bool {
 	switch key {
-	case "j", "k", "g", "G", "down", "up", "+", "-":
+	case "j", "k", "g", "G", "down", "up", "v", "V", "ctrl-v":
 		return true
 	}
 	return false
@@ -3057,12 +3111,14 @@ func (e *Editor) feedInsert(key string) Action {
 		}
 		e.pending = 0
 		e.normalCursorClamp()
+		e.commitCurswant()
 		return ActStay
 	case "enter":
 		e.blockChangeCols = nil
 		return ActAccept
 	case "ctrl-c":
 		e.blockChangeCols = nil
+		e.commitCurswant()
 		return ActCancel
 	case "bs":
 		if e.mode == ModeReplace && len(e.replaceSteps) > 0 {
@@ -3310,6 +3366,7 @@ func (e *Editor) feedNormal(key string) Action {
 				ed.deleteRange(ed.cursor, end)
 				ed.normalCursorClamp()
 			}
+			e.commitCurswant()
 			return ActStay
 		case 'X':
 			n := e.takeCount()
@@ -3333,6 +3390,7 @@ func (e *Editor) feedNormal(key string) Action {
 				ed.deleteRange(start, ed.cursor)
 				ed.normalCursorClamp()
 			}
+			e.commitCurswant()
 			return ActStay
 		case 'r':
 			e.pending = 'r'
@@ -3369,6 +3427,7 @@ func (e *Editor) feedNormal(key string) Action {
 			}
 			e.reg = e.linewiseRegister(start, end)
 			e.regKind = regLinewise
+			e.commitCurswant()
 			return ActStay
 		case 'p':
 			n := e.takeCount()
@@ -3450,6 +3509,7 @@ func (e *Editor) feedNormal(key string) Action {
 				e.runAtomicWithNoop(func() { e.lastEdit(e) }, true)
 				e.dotCount = 0
 				e.normalCursorClamp()
+				e.commitCurswant()
 			}
 			return ActStay
 		}
