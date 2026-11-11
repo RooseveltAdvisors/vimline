@@ -2440,12 +2440,15 @@ func (e *Editor) paste(before bool, count int) {
 				width = len(row)
 			}
 		}
-		desired := e.cursorColumn(e.cursor)
-		if !before {
-			desired++
-		}
 		cursorRow := e.lineIndexAt(e.lineBounds(), e.cursor)
-		cursorCol := desired
+		col := e.cursorColumn(e.cursor)
+		if !before {
+			col++
+		}
+		lines := e.lineBounds()
+		if lineLen := lines[cursorRow][1] - lines[cursorRow][0]; col > lineLen {
+			col = lineLen
+		}
 		for i, row := range rows {
 			line := row
 			if len(line) == 0 {
@@ -2465,11 +2468,6 @@ func (e *Editor) paste(before bool, count int) {
 				bounds = e.lineBounds()
 			}
 			ls, le := bounds[target][0], bounds[target][1]
-			lineLen := le - ls
-			col := desired
-			if target == cursorRow && col > lineLen {
-				col = lineLen
-			}
 			at := ls + col
 			pad := 0
 			if at > le {
@@ -2482,11 +2480,8 @@ func (e *Editor) paste(before bool, count int) {
 			}
 			insert = append(insert, chunk...)
 			e.text = append(e.text[:at], append(insert, e.text[at:]...)...)
-			if target == cursorRow {
-				cursorCol = col
-			}
 		}
-		e.cursor = e.lineBounds()[cursorRow][0] + cursorCol
+		e.cursor = e.lineBounds()[cursorRow][0] + col
 		e.clamp()
 		return
 	}

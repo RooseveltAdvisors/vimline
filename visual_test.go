@@ -669,6 +669,19 @@ func TestBlockwisePutColumnAligned(t *testing.T) {
 	if e.Text() != "abcd\nefghab\n    ef" {
 		t.Fatalf("p at buffer end text = %q", e.Text())
 	}
+	e = newVisualAt("abcd\nefgh\n\nqrst", 0)
+	feedVisualSeq(e, "<C-v>jlyjj0p")
+	if e.Text() != "abcd\nefgh\nab\nefqrst" {
+		t.Fatalf("p on empty cursor line text = %q", e.Text())
+	}
+	if e.Cursor() != 10 {
+		t.Fatalf("p on empty cursor line cursor = %d want 10", e.Cursor())
+	}
+	e = newVisualAt("abcd\nefgh\n\nqrst", 0)
+	feedVisualSeq(e, "<C-v>jlyjj02p")
+	if e.Text() != "abcd\nefgh\nabab\nefefqrst" {
+		t.Fatalf("counted p on empty cursor line text = %q", e.Text())
+	}
 }
 
 func TestBlockwiseDeleteRelocatesMarks(t *testing.T) {

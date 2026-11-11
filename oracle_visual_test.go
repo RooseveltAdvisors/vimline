@@ -60,6 +60,7 @@ func TestNeovimDifferentialVisual(t *testing.T) {
 		{Name: "block put P", Text: "abcd\nefgh\nwxyz\nqrst", Pos: 0, Keys: splitOracleKeys("<C-v>jlyjj0P")},
 		{Name: "block put p", Text: "abcd\nefgh\nwxyz\nqrst", Pos: 0, Keys: splitOracleKeys("<C-v>jlyjj0p")},
 		{Name: "block put p at buffer end", Text: "abcd\nefgh", Pos: 0, Keys: splitOracleKeys("<C-v>jlyG$p")},
+		{Name: "block put p on empty cursor line", Text: "abcd\nefgh\n\nqrst", Pos: 0, Keys: splitOracleKeys("<C-v>jlyjj0p")},
 		{Name: "block put pads empty register lines", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kyj0P")},
 		{Name: "ragged block left edge change", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kcXY<esc>")},
 		{Name: "ragged block left edge delete", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kd")},
