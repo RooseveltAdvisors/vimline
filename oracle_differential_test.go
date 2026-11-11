@@ -242,10 +242,32 @@ func runOracleDifferential(t *testing.T, cases []oracleCase, visual bool) {
 		}
 	}
 
+	for i, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			want := runOracleCase(t, cases[i], visual)
+			e := New(tc.Text)
+			e.SetMode(ModeNormal)
+			e.SetCursor(tc.Pos)
+			for _, key := range tc.Keys {
+				e.Feed(oracleKeyName(key))
+			}
+			if e.Text() != want.Text || e.Cursor() != want.Pos || e.Register() != want.Reg {
+				t.Fatalf("vimline=(text %q, cursor %d, reg %q), nvim=(text %q, cursor %d, reg %q)",
+					e.Text(), e.Cursor(), e.Register(), want.Text, want.Pos, want.Reg)
+			}
+		})
+	}
+}
+
+// runOracleCase drives one case through a fresh nvim process. nvim's
+// last-visual-op shape ([count]v reselect) is process-global state that no ex
+// or Lua command resets, so cases must not share a process.
+func runOracleCase(t *testing.T, tc oracleCase, visual bool) oracleResult {
+	t.Helper()
 	dir := t.TempDir()
-	inPath := filepath.Join(dir, "cases.json")
-	outPath := filepath.Join(dir, "results.json")
-	raw, err := json.Marshal(cases)
+	inPath := filepath.Join(dir, "case.json")
+	outPath := filepath.Join(dir, "result.json")
+	raw, err := json.Marshal([]oracleCase{tc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,25 +281,22 @@ func runOracleDifferential(t *testing.T, cases []oracleCase, visual bool) {
 	lua := `
 local input = os.getenv('VIMLINE_ORACLE_INPUT')
 local output = os.getenv('VIMLINE_ORACLE_OUTPUT')
-local cases = vim.json.decode(table.concat(vim.fn.readfile(input), "\n"))
-local results = {}
-for _, c in ipairs(cases) do
-  vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(c.text, "\n", { plain = true }))
-  vim.api.nvim_win_set_cursor(0, { c.row, c.col })
-  vim.fn.setreg('"', '')
-  vim.cmd('set undolevels=-1')
-  vim.cmd('set undolevels=1000')
+local c = vim.json.decode(table.concat(vim.fn.readfile(input), "\n"))[1]
+vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(c.text, "\n", { plain = true }))
+vim.api.nvim_win_set_cursor(0, { c.row, c.col })
+vim.fn.setreg('"', '')
+vim.cmd('set undolevels=-1')
+vim.cmd('set undolevels=1000')
 ` + apply + `
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  local pos = 0
-  for line = 1, cursor[1] - 1 do
-    pos = pos + vim.str_utfindex(lines[line]) + 1
-  end
-  pos = pos + vim.str_utfindex(lines[cursor[1]]:sub(1, cursor[2]))
-  table.insert(results, { text = table.concat(lines, "\n"), pos = pos, reg = vim.fn.getreg('"') })
+local cursor = vim.api.nvim_win_get_cursor(0)
+local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+local pos = 0
+for line = 1, cursor[1] - 1 do
+  pos = pos + vim.str_utfindex(lines[line]) + 1
 end
-vim.fn.writefile({ vim.json.encode(results) }, output)
+pos = pos + vim.str_utfindex(lines[cursor[1]]:sub(1, cursor[2]))
+local result = { { text = table.concat(lines, "\n"), pos = pos, reg = vim.fn.getreg('"') } }
+vim.fn.writefile({ vim.json.encode(result) }, output)
 vim.cmd('qa!')
 `
 	luaPath := filepath.Join(dir, "oracle.lua")
@@ -297,24 +316,10 @@ vim.cmd('qa!')
 	if err := json.Unmarshal(resultRaw, &results); err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != len(cases) {
-		t.Fatalf("oracle returned %d results for %d cases", len(results), len(cases))
+	if len(results) != 1 {
+		t.Fatalf("oracle returned %d results for 1 case", len(results))
 	}
-	for i, tc := range cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			e := New(tc.Text)
-			e.SetMode(ModeNormal)
-			e.SetCursor(tc.Pos)
-			for _, key := range tc.Keys {
-				e.Feed(oracleKeyName(key))
-			}
-			want := results[i]
-			if e.Text() != want.Text || e.Cursor() != want.Pos || e.Register() != want.Reg {
-				t.Fatalf("vimline=(text %q, cursor %d, reg %q), nvim=(text %q, cursor %d, reg %q)",
-					e.Text(), e.Cursor(), e.Register(), want.Text, want.Pos, want.Reg)
-			}
-		})
-	}
+	return results[0]
 }
 
 func splitOracleKeys(seq string) []string {

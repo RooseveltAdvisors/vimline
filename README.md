@@ -57,7 +57,11 @@ joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
 `d'a`/`y'a` with the apostrophe mark run charwise where nvim is linewise; a
 charwise put of multi-line text leaves the cursor at the end of the put where
 nvim leaves it at the start; and `>>` places the cursor in column 0 where nvim
-keeps the virtual column (tabs are one rune here). Live oracle binary is
+keeps the virtual column (tabs are one rune here). A text object with a
+live selection extends word objects from the cursor end like nvim; quote,
+bracket, sentence, and paragraph objects keep the object span where nvim
+extends by its per-object rules (probed live: `vli"y` on `say "hi" now`
+yanks `"hi"` in nvim). Live oracle binary is
 nvim 0.12.4; `=` on a leading-tab line leaves the cursor at the last column in
 that binary while vimline (and space-indented lines) use first-non-blank; Visual
 `$` / MAXCOL virtual-column edges beyond the accepted unequal-line block `$`

@@ -55,6 +55,17 @@ func TestNeovimDifferentialVisual(t *testing.T) {
 		{Name: "counted entry repeats charwise op", Text: "abcdefghijkl", Pos: 0, Keys: splitOracleKeys("3vdl2vd")},
 		{Name: "counted entry repeats linewise op", Text: "a\nb\nc\nd\ne\nf\ng\nh", Pos: 0, Keys: splitOracleKeys("Vjd2vd")},
 		{Name: "counted entry repeats block op", Text: "abcd\nefgh\nijkl\nmnop\nqrst\nuvwx", Pos: 0, Keys: splitOracleKeys("<C-v>jlyjjl2<C-v>d")},
+		{Name: "counted entry multi-line charwise", Text: "ab\ncd\nef\ngh\nij\nkl\nmn\nop", Pos: 0, Keys: splitOracleKeys("vjd2vd")},
+		{Name: "counted entry end column", Text: "abc\ndef\nghi\njkl\nmno\npqr\nstu", Pos: 0, Keys: splitOracleKeys("vjld2vd")},
+		{Name: "block put P", Text: "abcd\nefgh\nwxyz\nqrst", Pos: 0, Keys: splitOracleKeys("<C-v>jlyjj0P")},
+		{Name: "block put p", Text: "abcd\nefgh\nwxyz\nqrst", Pos: 0, Keys: splitOracleKeys("<C-v>jlyjj0p")},
+		{Name: "block put p at buffer end", Text: "abcd\nefgh", Pos: 0, Keys: splitOracleKeys("<C-v>jlyG$p")},
+		{Name: "block put pads empty register lines", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kyj0P")},
+		{Name: "ragged block left edge change", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kcXY<esc>")},
+		{Name: "ragged block left edge delete", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kd")},
+		{Name: "visual object extends linewise", Text: "one two\nthree four", Pos: 0, Keys: splitOracleKeys("Vjiwd")},
+		{Name: "visual object extends backward", Text: "one two three", Pos: 4, Keys: splitOracleKeys("vhiwd")},
+		{Name: "block text object keeps block", Text: "abcd\nefgh", Pos: 0, Keys: splitOracleKeys("<C-v>liwd")},
 	}
 	runOracleDifferential(t, cases, true)
 }

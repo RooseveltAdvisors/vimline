@@ -547,13 +547,127 @@ func TestVisualCountedEntryRepeatsLastOperation(t *testing.T) {
 func TestVisualBlockOperatorAnchorsAtTopRow(t *testing.T) {
 	e := newVisualAt("ab\nlongish", 8)
 	feedVisualSeq(e, "<C-v>kcXY<esc>")
-	if e.Text() != "abXY\nlongiXYh" {
+	if e.Text() != "abXY\nloXYh" {
 		t.Fatalf("text = %q", e.Text())
+	}
+	if e.Register() != "\nngis" {
+		t.Fatalf("reg = %q", e.Register())
 	}
 	e = newVisualAt("ab\nlongish", 8)
 	feedVisualSeq(e, "<C-v>ky")
 	if e.Cursor() != 1 {
 		t.Fatalf("cursor = %d want 1", e.Cursor())
+	}
+}
+
+func TestVisualRaggedBlockLeftEdge(t *testing.T) {
+	e := newVisualAt("ab\nlongish", 8)
+	feedVisualSeq(e, "<C-v>kd")
+	if e.Text() != "ab\nloh" || e.Register() != "\nngis" {
+		t.Fatalf("d text = %q reg = %q", e.Text(), e.Register())
+	}
+	e = newVisualAt("ab\nlongish", 8)
+	feedVisualSeq(e, "<C-v>ky")
+	if e.Register() != "\nngis" {
+		t.Fatalf("y reg = %q", e.Register())
+	}
+	e = newVisualAt("ab\nlongish", 8)
+	feedVisualSeq(e, "<C-v>k~")
+	if e.Text() != "ab\nloNGISh" {
+		t.Fatalf("tilde text = %q", e.Text())
+	}
+	e = newVisualAt("abc\nlongish", 9)
+	feedVisualSeq(e, "<C-v>ky")
+	if e.Register() != "\ngis" {
+		t.Fatalf("edge reg = %q", e.Register())
+	}
+}
+
+func TestVisualCountedEntryMultilineCharwise(t *testing.T) {
+	e := newVisualAt("ab\ncd\nef\ngh\nij\nkl\nmn\nop", 0)
+	feedVisualSeq(e, "vjd2vd")
+	if e.Text() != "j\nkl\nmn\nop" || e.Register() != "d\nef\ngh\ni" {
+		t.Fatalf("text = %q reg = %q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abc\ndef\nghi\njkl\nmno\npqr\nstu", 0)
+	feedVisualSeq(e, "vjld2vd")
+	if e.Text() != "o\npqr\nstu" || e.Register() != "f\nghi\njkl\nmn" {
+		t.Fatalf("text = %q reg = %q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualTextObjectExtendsSelection(t *testing.T) {
+	e := newVisualAt("one two\nthree four", 0)
+	feedVisualSeq(e, "Vjiwd")
+	if e.Text() != " four" || e.Register() != "one two\nthree" {
+		t.Fatalf("text = %q reg = %q", e.Text(), e.Register())
+	}
+	e = newVisualAt("one two three", 4)
+	feedVisualSeq(e, "vhiwd")
+	if e.Text() != "wo three" || e.Register() != "one t" {
+		t.Fatalf("text = %q reg = %q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualTextObjectUnknownNoops(t *testing.T) {
+	e := newVisualAt("abcd", 0)
+	feedVisualSeq(e, "v2l")
+	feedVisualSeq(e, "i)")
+	if e.Mode() != ModeVisual {
+		t.Fatalf("mode after unknown object = %v", e.Mode())
+	}
+	v := e.View("/", true)
+	if !v.SelActive || v.SelStart != 0 || v.SelEnd != 2 {
+		t.Fatalf("sel after unknown object = %+v", v)
+	}
+	feedVisualSeq(e, "ib")
+	if e.Mode() != ModeVisual {
+		t.Fatalf("mode after unmatched object = %v", e.Mode())
+	}
+	v = e.View("/", true)
+	if !v.SelActive || v.SelStart != 0 || v.SelEnd != 2 {
+		t.Fatalf("sel after unmatched object = %+v", v)
+	}
+	feedVisualSeq(e, "<esc>")
+	if e.Text() != "abcd" {
+		t.Fatalf("text = %q", e.Text())
+	}
+}
+
+func TestVisualBlockTextObjectKeepsBlockwise(t *testing.T) {
+	e := newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>liwd")
+	if e.Text() != "\nefgh" || e.Register() != "abcd" {
+		t.Fatalf("text = %q reg = %q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>liwyj0P")
+	if e.Text() != "abcd\nabcdefgh" {
+		t.Fatalf("blockwise put after object yank text = %q", e.Text())
+	}
+}
+
+func TestBlockwisePutColumnAligned(t *testing.T) {
+	e := newVisualAt("abcd\nefgh\nwxyz\nqrst", 0)
+	feedVisualSeq(e, "<C-v>jlyjj0P")
+	if e.Text() != "abcd\nefgh\nabwxyz\nefqrst" {
+		t.Fatalf("P text = %q", e.Text())
+	}
+	if e.Cursor() != 10 {
+		t.Fatalf("P cursor = %d want 10", e.Cursor())
+	}
+	e = newVisualAt("abcd\nefgh\nwxyz\nqrst", 0)
+	feedVisualSeq(e, "<C-v>jlyjj0p")
+	if e.Text() != "abcd\nefgh\nwabxyz\nqefrst" {
+		t.Fatalf("p text = %q", e.Text())
+	}
+	if e.Cursor() != 11 {
+		t.Fatalf("p cursor = %d want 11", e.Cursor())
+	}
+	e = newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>jlyG$p")
+	if e.Text() != "abcd\nefghab\n    ef" {
+		t.Fatalf("p at buffer end text = %q", e.Text())
 	}
 }
 

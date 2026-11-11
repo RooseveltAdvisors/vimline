@@ -58,6 +58,16 @@ type undoSnap struct {
 	hasRedoCursor bool
 }
 
+// regKind is the shape of the unnamed register: characterwise, linewise, or
+// blockwise (one line per block row).
+type regKind uint8
+
+const (
+	regCharwise regKind = iota
+	regLinewise
+	regBlockwise
+)
+
 type replaceStep struct {
 	pos      int
 	original []rune
@@ -77,8 +87,8 @@ type Editor struct {
 
 	reg      []rune
 	regMarks map[rune]int
-	// regLinewise distinguishes yy/dd-style puts from characterwise puts.
-	regLinewise bool
+	// regKind distinguishes yy/dd-style and blockwise puts from charwise puts.
+	regKind regKind
 
 	undo []undoSnap
 	redo []undoSnap
@@ -495,14 +505,14 @@ func (e *Editor) operatePercent(op rune, percent int) {
 	reg := e.linewiseRegister(cs, ce)
 	switch op {
 	case 'y':
-		e.reg, e.regLinewise = reg, true
+		e.reg, e.regKind = reg, regLinewise
 	case 'd':
 		e.deleteRange(ds, de)
-		e.reg, e.regLinewise = reg, true
+		e.reg, e.regKind = reg, regLinewise
 		e.placeAtColumn(ds, column)
 	case 'c':
 		e.deleteRange(ds, de)
-		e.reg, e.regLinewise = reg, true
+		e.reg, e.regKind = reg, regLinewise
 		e.cursor = ds
 		e.beginChange('L', 1)
 		e.mode = ModeInsert
@@ -1199,7 +1209,7 @@ func (e *Editor) operateLinewiseSpan(op rune, start, end int, kind spanKind) {
 	switch op {
 	case 'y':
 		e.reg = reg
-		e.regLinewise = true
+		e.regKind = regLinewise
 		e.cursor = start
 	case 'd':
 		column := e.cursorColumn(e.cursor)
@@ -1212,7 +1222,7 @@ func (e *Editor) operateLinewiseSpan(op rune, start, end int, kind spanKind) {
 		}
 		e.deleteRange(delStart, delEnd)
 		e.reg = reg
-		e.regLinewise = true
+		e.regKind = regLinewise
 		if kind == spanLinewiseDelete {
 			e.placeAtColumn(delStart, column)
 		} else {
@@ -1235,7 +1245,7 @@ func (e *Editor) operateLinewiseSpan(op rune, start, end int, kind spanKind) {
 			e.pushUndo()
 		}
 		e.reg = reg
-		e.regLinewise = true
+		e.regKind = regLinewise
 		e.cursor = insertAt
 	}
 }
@@ -1296,7 +1306,7 @@ func (e *Editor) deleteRange(a, b int) {
 			e.regMarks[name] = p - a
 		}
 	}
-	e.regLinewise = false
+	e.regKind = regCharwise
 	e.relocateMarksForDelete(a, b)
 	out := make([]rune, 0, len(e.text)-(b-a))
 	out = append(out, e.text[:a]...)
@@ -1324,11 +1334,11 @@ func (e *Editor) relocateMarksForDelete(a, b int) {
 func (e *Editor) deleteRangeNoRegister(a, b int) {
 	reg := append([]rune(nil), e.reg...)
 	regMarks := cloneMarks(e.regMarks)
-	linewise := e.regLinewise
+	kind := e.regKind
 	e.deleteRange(a, b)
 	e.reg = reg
 	e.regMarks = regMarks
-	e.regLinewise = linewise
+	e.regKind = kind
 }
 
 func (e *Editor) linewiseRegister(start, end int) []rune {
@@ -1516,7 +1526,7 @@ func (e *Editor) endChange() {
 			}
 			ed.deleteRange(insertAt, ce)
 			ed.reg = lineReg
-			ed.regLinewise = true
+			ed.regKind = regLinewise
 			ed.cursor = insertAt
 			ed.insertRunes(ins)
 		case 'S':
@@ -1531,7 +1541,7 @@ func (e *Editor) endChange() {
 			lineReg := ed.linewiseRegister(cs, ce)
 			ed.deleteRange(cs, ce)
 			ed.reg = lineReg
-			ed.regLinewise = true
+			ed.regKind = regLinewise
 			ed.cursor = cs
 			ed.insertRunes(ins)
 		case 's':
@@ -1561,7 +1571,7 @@ func (e *Editor) endChange() {
 				ed.deleteRange(s, en)
 				if obj == 'p' {
 					ed.reg = lineReg
-					ed.regLinewise = true
+					ed.regKind = regLinewise
 				}
 				ed.insertRunes(ins)
 			} else if obj == 's' {
@@ -1623,7 +1633,7 @@ func (e *Editor) endChange() {
 				li := ed.lineIndexAt(lines, ed.cursor)
 				cells := ed.blockCellsAt(li, li+repeatCount-1, col, col+blockWidth-1, false)
 				ed.reg = blockRegister(ed.text, cells, blockWidth)
-				ed.regLinewise = false
+				ed.regKind = regBlockwise
 				for i := len(cells) - 1; i >= 0; i-- {
 					c := cells[i]
 					ed.relocateMarksForDelete(c.start, c.end)
@@ -1719,6 +1729,7 @@ func (e *Editor) operateSpan(op rune, start, end int) {
 	switch op {
 	case 'y':
 		e.reg = append([]rune(nil), e.text[start:end]...)
+		e.regKind = regCharwise
 		e.cursor = start
 	case 'd':
 		e.cursor = start
@@ -1837,6 +1848,7 @@ func (e *Editor) operateFind(op, kind, ch rune, count int, isRepeat bool) {
 	switch op {
 	case 'y':
 		e.reg = append([]rune(nil), e.text[s:en]...)
+		e.regKind = regCharwise
 		e.cursor = s
 	case 'd':
 		e.cursor = s
@@ -1863,7 +1875,7 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 	if !ok {
 		if obj == 'p' && len(e.text) == 0 {
 			e.reg = []rune{'\n'}
-			e.regLinewise = true
+			e.regKind = regLinewise
 		}
 		if op == 'c' && obj == 's' {
 			e.pushUndo()
@@ -1946,7 +1958,10 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 		if obj == 't' && around && s == 0 && en == len(e.text) {
 			e.reg = append(e.reg, '\n')
 		}
-		e.regLinewise = obj == 'p' || (obj == 't' && around && s == 0 && en == len(e.text))
+		e.regKind = regCharwise
+		if obj == 'p' || (obj == 't' && around && s == 0 && en == len(e.text)) {
+			e.regKind = regLinewise
+		}
 		e.cursor = s
 	case 'd':
 		column := e.cursorColumn(e.cursor)
@@ -1968,7 +1983,7 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 		e.setLastUndoRedoCursor(s)
 		if obj == 'p' || (obj == 't' && around && s == 0 && en == len(e.text)) {
 			e.reg = linewiseRegister
-			e.regLinewise = true
+			e.regKind = regLinewise
 		}
 		if obj == 'p' {
 			e.placeAtColumn(deleteStart, column)
@@ -1986,7 +2001,7 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 				lineReg := paragraphRegister(e.text[s:en], around, en == len(e.text))
 				e.deleteRange(selLE, en)
 				e.reg = lineReg
-				e.regLinewise = true
+				e.regKind = regLinewise
 				e.cursor = selLE
 				e.beginChange('i', count)
 				e.mode = ModeInsert
@@ -2001,7 +2016,7 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 					e.pushUndo()
 				}
 				e.reg = lineReg
-				e.regLinewise = true
+				e.regKind = regLinewise
 				e.cursor = le
 				e.beginChange('i', count)
 				e.mode = ModeInsert
@@ -2018,7 +2033,7 @@ func (e *Editor) operateTextObject(op rune, around bool, obj rune, count int) {
 		e.deleteRange(s, en)
 		if obj == 'p' {
 			e.reg = linewiseRegister
-			e.regLinewise = true
+			e.regKind = regLinewise
 		}
 		e.cursor = s
 		e.beginChange('O', count)
@@ -2048,11 +2063,11 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 		switch op {
 		case 'y':
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 		case 'd':
 			e.deleteRange(ds, de)
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.placeAtColumn(ds, column)
 			tl, exp := targetLine, explicitCount
 			e.lastEdit = func(ed *Editor) {
@@ -2078,7 +2093,7 @@ func (e *Editor) operateG(op, sub rune, count int, explicitCount bool) {
 				e.pushUndo()
 			}
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.cursor = insertAt
 			e.beginChange('L', 1)
 			e.historyCursor = originalCursor
@@ -2167,11 +2182,11 @@ func (e *Editor) operate(op, m rune, count int) {
 		switch op {
 		case 'y':
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 		case 'd':
 			e.deleteRange(ds, de)
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.placeAtColumn(ds, column)
 			d := delta
 			e.lastEdit = func(ed *Editor) {
@@ -2185,7 +2200,7 @@ func (e *Editor) operate(op, m rune, count int) {
 				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
 				ed.reg = lineReg
-				ed.regLinewise = true
+				ed.regKind = regLinewise
 				ed.placeAtColumn(a, column)
 			}
 		case 'c':
@@ -2199,7 +2214,7 @@ func (e *Editor) operate(op, m rune, count int) {
 				e.pushUndo()
 			}
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.cursor = insertAt
 			e.beginChange('L', 1)
 			e.mode = ModeInsert
@@ -2216,11 +2231,11 @@ func (e *Editor) operate(op, m rune, count int) {
 		switch op {
 		case 'y':
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 		case 'd':
 			e.deleteRange(ds, de)
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.placeAtColumn(ds, column)
 			e.lastEdit = func(ed *Editor) {
 				ls := ed.lineBounds()
@@ -2230,14 +2245,14 @@ func (e *Editor) operate(op, m rune, count int) {
 				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
 				ed.reg = lineReg
-				ed.regLinewise = true
+				ed.regKind = regLinewise
 				ed.placeAtColumn(a, column)
 			}
 		case 'c':
 			originalCursor := e.cursor
 			e.deleteRange(cs, ce)
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.cursor = cs
 			e.beginChange('L', 1)
 			if curLine+1 < len(lines) {
@@ -2286,11 +2301,11 @@ func (e *Editor) operate(op, m rune, count int) {
 		switch op {
 		case 'y':
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 		case 'd':
 			e.deleteRange(ds, de)
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.placeAtColumn(ds, column)
 			d := delta
 			e.lastEdit = func(ed *Editor) {
@@ -2304,13 +2319,13 @@ func (e *Editor) operate(op, m rune, count int) {
 				lineReg := ed.linewiseRegister(cs, ce)
 				ed.deleteRange(a, b)
 				ed.reg = lineReg
-				ed.regLinewise = true
+				ed.regKind = regLinewise
 				ed.placeAtColumn(a, column)
 			}
 		case 'c':
 			e.deleteRange(cs, ce)
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.cursor = cs
 			e.beginChange('L', 1)
 			e.mode = ModeInsert
@@ -2359,6 +2374,7 @@ func (e *Editor) operate(op, m rune, count int) {
 			return
 		}
 		e.reg = append([]rune(nil), e.text[start:end]...)
+		e.regKind = regCharwise
 		e.cursor = start
 	case 'd':
 		switch kind {
@@ -2385,7 +2401,7 @@ func (e *Editor) operate(op, m rune, count int) {
 		if count == 1 && (originalMotion == 'w' || originalMotion == 'W') && start < len(e.text) && e.text[start] == '\n' {
 			e.pushUndo()
 			e.reg = []rune{'\n'}
-			e.regLinewise = false
+			e.regKind = regCharwise
 			e.beginChange(originalMotion, count)
 			e.mode = ModeInsert
 			return
@@ -2408,7 +2424,73 @@ func (e *Editor) paste(before bool, count int) {
 		count = 1
 	}
 	e.pushUndo()
-	if e.regLinewise {
+	if e.regKind == regBlockwise {
+		var rows [][]rune
+		start := 0
+		for i, r := range e.reg {
+			if r == '\n' {
+				rows = append(rows, e.reg[start:i])
+				start = i + 1
+			}
+		}
+		rows = append(rows, e.reg[start:])
+		width := 0
+		for _, row := range rows {
+			if len(row) > width {
+				width = len(row)
+			}
+		}
+		desired := e.cursorColumn(e.cursor)
+		if !before {
+			desired++
+		}
+		cursorRow := e.lineIndexAt(e.lineBounds(), e.cursor)
+		cursorCol := desired
+		for i, row := range rows {
+			line := row
+			if len(line) == 0 {
+				line = make([]rune, width)
+				for j := range line {
+					line[j] = ' '
+				}
+			}
+			chunk := make([]rune, 0, len(line)*count)
+			for range count {
+				chunk = append(chunk, line...)
+			}
+			bounds := e.lineBounds()
+			target := cursorRow + i
+			for target >= len(bounds) {
+				e.text = append(e.text, '\n')
+				bounds = e.lineBounds()
+			}
+			ls, le := bounds[target][0], bounds[target][1]
+			lineLen := le - ls
+			col := desired
+			if target == cursorRow && col > lineLen {
+				col = lineLen
+			}
+			at := ls + col
+			pad := 0
+			if at > le {
+				pad = at - le
+				at = le
+			}
+			var insert []rune
+			for ; pad > 0; pad-- {
+				insert = append(insert, ' ')
+			}
+			insert = append(insert, chunk...)
+			e.text = append(e.text[:at], append(insert, e.text[at:]...)...)
+			if target == cursorRow {
+				cursorCol = col
+			}
+		}
+		e.cursor = e.lineBounds()[cursorRow][0] + cursorCol
+		e.clamp()
+		return
+	}
+	if e.regKind == regLinewise {
 		ls, le, _, _ := e.lineAt(e.cursor)
 		at := ls
 		atEnd := false
@@ -3139,7 +3221,7 @@ func (e *Editor) feedNormal(key string) Action {
 			lineReg := e.linewiseRegister(cs, ce)
 			e.deleteRange(cs, ce)
 			e.reg = lineReg
-			e.regLinewise = true
+			e.regKind = regLinewise
 			e.cursor = cs
 			e.beginChange('S', n)
 			e.mode = ModeInsert
@@ -3242,7 +3324,7 @@ func (e *Editor) feedNormal(key string) Action {
 				return ActStay
 			}
 			e.reg = e.linewiseRegister(start, end)
-			e.regLinewise = true
+			e.regKind = regLinewise
 			return ActStay
 		case 'p':
 			n := e.takeCount()
