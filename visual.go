@@ -596,7 +596,7 @@ func (e *Editor) visualTextObject(around bool, obj rune, count int) bool {
 	return true
 }
 
-func (e *Editor) operateVisual(op rune) {
+func (e *Editor) operateVisual(op rune, count int) {
 	kind := e.visualKind
 	e.rememberVisual()
 	switch kind {
@@ -630,8 +630,10 @@ func (e *Editor) operateVisual(op rune) {
 	switch op {
 	case 'd', 'c', 'y':
 		e.operateVisualYankDelete(op, kind)
-	case '>', '<', '=':
-		e.operateVisualIndent(op)
+	case '>', '<':
+		e.operateVisualIndent(op, count)
+	case '=':
+		e.operateVisualIndent(op, 1)
 	case '~':
 		e.operateVisualCase(0)
 	case 'u':
@@ -806,7 +808,7 @@ func (e *Editor) operateVisualYankDelete(op rune, kind VisualKind) {
 	}
 }
 
-func (e *Editor) operateVisualIndent(op rune) {
+func (e *Editor) operateVisualIndent(op rune, levels int) {
 	_, _, first, last, ok := e.visualLineSpan()
 	e.mode = ModeNormal
 	if !ok {
@@ -815,7 +817,7 @@ func (e *Editor) operateVisualIndent(op rune) {
 	}
 	lines := e.lineBounds()
 	e.cursor = lines[first][0]
-	e.operateIndent(op, op, last-first+1)
+	e.operateIndent(op, op, last-first+1, levels)
 	if op == '=' {
 		lines = e.lineBounds()
 		e.cursor = e.firstNonBlank(lines[first][0])
@@ -958,6 +960,14 @@ func (e *Editor) operateVisualJoin() {
 }
 
 func (e *Editor) feedVisual(key string) Action {
+	if e.pending == 'r' || e.pending == '/' || e.pending == '?' {
+		if e.pending == 'r' || key == "enter" || key == "esc" {
+			e.pending = 0
+		}
+		e.count = 0
+		return ActStay
+	}
+
 	// Pending find character.
 	if e.pending == 'f' || e.pending == 'F' || e.pending == 't' || e.pending == 'T' {
 		m := e.pending
@@ -1098,16 +1108,24 @@ func (e *Editor) feedVisual(key string) Action {
 			e.pending = r
 			return ActStay
 		case 'd', 'c', 'y', '>', '<', '=', '~', 'u', 'U', 'J':
-			e.count = 0
-			e.operateVisual(r)
+			e.operateVisual(r, e.takeCount())
 			return ActStay
 		case 'x', 's':
-			e.count = 0
+			n := e.takeCount()
 			if r == 's' {
-				e.operateVisual('c')
+				e.operateVisual('c', n)
 			} else {
-				e.operateVisual('d')
+				e.operateVisual('d', n)
 			}
+			return ActStay
+		case 'p', 'P', 'n', 'N':
+			e.count = 0
+			return ActStay
+		case 'r':
+			e.pending = 'r'
+			return ActStay
+		case '/', '?':
+			e.pending = r
 			return ActStay
 		case 'g':
 			e.pending = 'g'

@@ -684,6 +684,77 @@ func TestBlockwisePutColumnAligned(t *testing.T) {
 	}
 }
 
+func TestVisualIndentCountMultipliesLevels(t *testing.T) {
+	e := newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "v2l3>")
+	if e.Text() != "\t\t\tabcdef" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	e = newVisualAt("a\nb", 0)
+	feedVisualSeq(e, "Vj2>")
+	if e.Text() != "\t\ta\n\t\tb" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	e = newVisualAt("\t\t\tabcdef", 0)
+	feedVisualSeq(e, "v2l3<")
+	if e.Text() != "abcdef" {
+		t.Fatalf("text = %q", e.Text())
+	}
+	e = newVisualAt("abcdef\nxyz", 0)
+	feedVisualSeq(e, "v2l3>j.")
+	if e.Text() != "\t\t\tabcdef\n\t\t\txyz" {
+		t.Fatalf("dot repeat text = %q", e.Text())
+	}
+}
+
+func TestVisualOperatorCountIgnoredForNonShift(t *testing.T) {
+	e := newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "v2l3x")
+	if e.Text() != "def" || e.Register() != "abc" {
+		t.Fatalf("x text=%q reg=%q", e.Text(), e.Register())
+	}
+	e = newVisualAt("abcdef", 0)
+	feedVisualSeq(e, "v2l3d")
+	if e.Text() != "def" || e.Register() != "abc" {
+		t.Fatalf("d text=%q reg=%q", e.Text(), e.Register())
+	}
+}
+
+func TestVisualGapKeysDiscardOperands(t *testing.T) {
+	e := newVisualAt("abcd", 0)
+	feedVisualSeq(e, "vllrx")
+	if e.Text() != "abcd" {
+		t.Fatalf("r operand ran as a command: %q", e.Text())
+	}
+	if e.Mode() != ModeVisual {
+		t.Fatalf("mode = %v", e.Mode())
+	}
+	v := e.View("/", true)
+	if !v.SelActive || v.SelStart != 0 || v.SelEnd != 2 {
+		t.Fatalf("sel = %+v", v)
+	}
+	e = newVisualAt("one two one", 0)
+	feedVisualSeq(e, "v/two<cr>")
+	if e.Text() != "one two one" || e.Cursor() != 0 {
+		t.Fatalf("search pattern ran as commands: text=%q cursor=%d", e.Text(), e.Cursor())
+	}
+	if e.Mode() != ModeVisual {
+		t.Fatalf("mode = %v", e.Mode())
+	}
+	feedVisualSeq(e, "x")
+	if e.Text() != "ne two one" {
+		t.Fatalf("later key misrouted after pattern: %q", e.Text())
+	}
+	e = newVisualAt("abcd\nefgh", 0)
+	feedVisualSeq(e, "<C-v>lyj0vlp")
+	if e.Text() != "abcd\nefgh" {
+		t.Fatalf("p changed the buffer: %q", e.Text())
+	}
+	if e.Mode() != ModeVisual {
+		t.Fatalf("mode = %v", e.Mode())
+	}
+}
+
 func TestBlockwiseDeleteRelocatesMarks(t *testing.T) {
 	e := newVisualAt("abcd\nefgh", 6)
 	feedVisualSeq(e, "mak0<C-v>jd`a")

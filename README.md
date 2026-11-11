@@ -51,17 +51,22 @@ atoms are not translated, so Vim pattern syntax is not supported in v0.4.0.
 The Vim-to-RE2 translation layer and nvim differential pattern tests are
 tracked for a later release in `wiseman-tftd`.
 
-Known gaps recorded against nvim 0.12.5 (each verified live, none silently
-dropped): a counted `w`/`W` operator that ends in column 0 of a later line
+Known gaps recorded against nvim 0.12.5 (each verified live): a counted
+`w`/`W` operator that ends in column 0 of a later line
 joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
 `d'a`/`y'a` with the apostrophe mark run charwise where nvim is linewise; a
 charwise put of multi-line text leaves the cursor at the end of the put where
 nvim leaves it at the start; and `>>` places the cursor in column 0 where nvim
-keeps the virtual column (tabs are one rune here). A text object with a
-live selection extends word objects from the cursor end like nvim; quote,
-bracket, sentence, and paragraph objects keep the object span where nvim
-extends by its per-object rules (probed live: `vli"y` on `say "hi" now`
-yanks `"hi"` in nvim). Live oracle binary is
+keeps the virtual column (tabs are one rune here). Visual mode does not
+implement `p`, `P`, `r`, `/?` search, or `n`/`N`; those keys are ignored and
+their operands are discarded so later keys are not misread. A text object
+with a charwise or linewise live selection extends word objects from the
+cursor end like nvim; quote, bracket, sentence, and paragraph objects keep
+the object span where nvim extends by its per-object rules (probed live:
+`vli"y` on `say "hi" now` yanks `"hi"` in nvim). Multi-row blockwise text
+objects keep the block rectangle; per-row word expansion is deferred as a
+declared gap this release (not implemented), although matched-column probes
+of `<C-v>jjiwd` on `abcd\nefgh\nijkl` matched nvim 0.12.4. Live oracle binary is
 nvim 0.12.4; `=` on a leading-tab line leaves the cursor at the last column in
 that binary while vimline (and space-indented lines) use first-non-blank; Visual
 `$` / MAXCOL virtual-column edges beyond the accepted unequal-line block `$`

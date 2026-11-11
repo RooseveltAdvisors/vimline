@@ -519,7 +519,10 @@ func (e *Editor) operatePercent(op rune, percent int) {
 	}
 }
 
-func (e *Editor) operateIndent(op, motion rune, count int) {
+func (e *Editor) operateIndent(op, motion rune, count, levels int) {
+	if levels < 1 {
+		levels = 1
+	}
 	lines := e.lineBounds()
 	cur := e.lineIndexAt(lines, e.cursor)
 	first, last := cur, cur
@@ -562,28 +565,30 @@ func (e *Editor) operateIndent(op, motion rune, count int) {
 	e.pushUndo()
 	for line := last; line >= first; line-- {
 		start := lines[line][0]
-		switch op {
-		case '>':
-			// nvim's op_shift leaves empty lines alone.
-			if start < len(e.text) && e.text[start] != '\n' {
-				e.text = append(e.text[:start], append([]rune{'\t'}, e.text[start:]...)...)
-			}
-		case '<':
-			if start < len(e.text) && e.text[start] == '\t' {
-				e.text = append(e.text[:start], e.text[start+1:]...)
-			} else {
+		for range levels {
+			switch op {
+			case '>':
+				// nvim's op_shift leaves empty lines alone.
+				if start < len(e.text) && e.text[start] != '\n' {
+					e.text = append(e.text[:start], append([]rune{'\t'}, e.text[start:]...)...)
+				}
+			case '<':
+				if start < len(e.text) && e.text[start] == '\t' {
+					e.text = append(e.text[:start], e.text[start+1:]...)
+				} else {
+					end := start
+					for end < len(e.text) && end < start+8 && e.text[end] == ' ' {
+						end++
+					}
+					e.text = append(e.text[:start], e.text[end:]...)
+				}
+			case '=':
 				end := start
-				for end < len(e.text) && end < start+8 && e.text[end] == ' ' {
+				for end < len(e.text) && isSpaceNotNL(e.text[end]) {
 					end++
 				}
 				e.text = append(e.text[:start], e.text[end:]...)
 			}
-		case '=':
-			end := start
-			for end < len(e.text) && isSpaceNotNL(e.text[end]) {
-				end++
-			}
-			e.text = append(e.text[:start], e.text[end:]...)
 		}
 	}
 	lines = e.lineBounds()
@@ -592,13 +597,13 @@ func (e *Editor) operateIndent(op, motion rune, count int) {
 		p = lines[first][1] - 1
 	}
 	e.cursor = p
-	oo, mm, cc := op, motion, count
+	oo, mm, cc, lv := op, motion, count, levels
 	e.lastEdit = func(ed *Editor) {
 		repeat := cc
 		if ed.dotCount > 0 {
 			repeat = ed.dotCount
 		}
-		ed.operateIndent(oo, mm, repeat)
+		ed.operateIndent(oo, mm, repeat, lv)
 	}
 }
 
@@ -2899,7 +2904,7 @@ func (e *Editor) Feed(key string) Action {
 			e.pending = 0
 			e.pendingOp = 0
 			if op == '<' || op == '>' || op == '=' {
-				e.operateIndent(op, op, cnt)
+				e.operateIndent(op, op, cnt, 1)
 			} else {
 				e.operate(op, op, cnt)
 			}
@@ -2959,7 +2964,7 @@ func (e *Editor) Feed(key string) Action {
 			e.pending = 0
 			e.pendingOp = 0
 			if op == '<' || op == '>' || op == '=' {
-				e.operateIndent(op, m, cnt)
+				e.operateIndent(op, m, cnt, 1)
 			} else if m == '%' && explicitCount {
 				e.operatePercent(op, cnt)
 			} else {

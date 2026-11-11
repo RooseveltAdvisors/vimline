@@ -67,6 +67,9 @@ func TestNeovimDifferentialVisual(t *testing.T) {
 		{Name: "visual object extends linewise", Text: "one two\nthree four", Pos: 0, Keys: splitOracleKeys("Vjiwd")},
 		{Name: "visual object extends backward", Text: "one two three", Pos: 4, Keys: splitOracleKeys("vhiwd")},
 		{Name: "block text object keeps block", Text: "abcd\nefgh", Pos: 0, Keys: splitOracleKeys("<C-v>liwd")},
+		{Name: "counted visual shift", Text: "abcdef", Pos: 0, Keys: splitOracleKeys("v2l3>")},
+		{Name: "counted visual shift lines", Text: "a\nb", Pos: 0, Keys: splitOracleKeys("Vj2>")},
+		{Name: "counted visual unshift", Text: "\t\t\tabcdef", Pos: 0, Keys: splitOracleKeys("v2l3<")},
 	}
 	runOracleDifferential(t, cases, true)
 }
