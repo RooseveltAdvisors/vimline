@@ -10,6 +10,10 @@ import (
 func TestNeovimDifferentialVisual(t *testing.T) {
 	cases := []oracleCase{
 		{Name: `vi"d`, Text: `one "two" three`, Pos: 5, Keys: splitOracleKeys(`vi"d`)},
+		{Name: "visd stops before line break", Text: "One two.\nThree four.", Pos: 0, Keys: splitOracleKeys("visd")},
+		{Name: "Visd stops before line break", Text: "One two.\nThree four.", Pos: 0, Keys: splitOracleKeys("Visd")},
+		{Name: "vasd stops before line break", Text: "One two.\nThree four.", Pos: 0, Keys: splitOracleKeys("vasd")},
+		{Name: "visd before blank line", Text: "Hi there.\n\nNext one.", Pos: 0, Keys: splitOracleKeys("visd")},
 		{Name: `va"d`, Text: `xx"yy"zz`, Pos: 3, Keys: splitOracleKeys(`va"d`)},
 		{Name: "viwd", Text: "one two three", Pos: 4, Keys: splitOracleKeys("viwd")},
 		{Name: "vawd", Text: "  hello x", Pos: 2, Keys: splitOracleKeys("vawd")},

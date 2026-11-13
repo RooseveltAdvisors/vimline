@@ -469,7 +469,8 @@ func TestVisualBlockGotoKeepsVirtualColumn(t *testing.T) {
 
 func TestViewBlockwisePerRowSpans(t *testing.T) {
 	e := newVisualAt("abcd\nefgh", 0)
-	feedVisualSeq(e, "<C-v>l")
+	// <C-v>jl spans two rows; <C-v>l alone stays on one row in nvim.
+	feedVisualSeq(e, "<C-v>jl")
 	v := e.View("/", true)
 	if !v.SelActive || v.SelStart != 0 || v.SelEnd != 6 {
 		t.Fatalf("flat sel active=%v start=%d end=%d", v.SelActive, v.SelStart, v.SelEnd)

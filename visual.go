@@ -545,6 +545,11 @@ func (e *Editor) visualObjectSpan(around bool, obj rune, count int) (int, int, b
 	if !ok {
 		return 0, 0, false
 	}
+	// A Visual sentence object stops before the line break that ends its
+	// line; only the operator-pending form (dis, das) takes the break.
+	if obj == 's' && en > s+1 && e.text[en-1] == '\n' {
+		en--
+	}
 	if en <= s {
 		if !around && (obj == '"' || obj == '\'' || obj == '`') {
 			s, en, ok = e.textObjectSpan(true, obj, count)
