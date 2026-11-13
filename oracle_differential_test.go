@@ -27,12 +27,6 @@ type oracleResult struct {
 }
 
 func TestNeovimDifferentialV031Acceptance(t *testing.T) {
-	if _, err := exec.LookPath("nvim"); err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("nvim is required in CI so the live differential gates the suite")
-		}
-		t.Skip("nvim is not installed; deterministic oracle regressions still run")
-	}
 	cases := []oracleCase{
 		{Name: "cw dot", Text: "one (a (b) c)", Pos: 0, Keys: splitOracleKeys("cwQQ<esc>.")},
 		{Name: "operator underscore", Text: "one (two)\nthree four\n\nfive", Pos: 6, Keys: splitOracleKeys("d_")},
@@ -220,6 +214,18 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 		{Name: "dot repeat dj register", Text: "abcd\nx\nyz\nw", Pos: 3, Keys: splitOracleKeys("dj.")},
 		{Name: "dot repeat dj register pastes lines", Text: "abcd\nx\nyz\nw\nq", Pos: 3, Keys: splitOracleKeys("dj.p")},
 		{Name: "dot repeat dk register", Text: "a\nb\nc\nd", Pos: 6, Keys: splitOracleKeys("dk.")},
+		{Name: "normal = preserves column", Text: "  abcdef", Pos: 2, Keys: splitOracleKeys("==")},
+	}
+	runOracleDifferential(t, cases, false)
+}
+
+func runOracleDifferential(t *testing.T, cases []oracleCase, visual bool) {
+	t.Helper()
+	if _, err := exec.LookPath("nvim"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("nvim is required in CI so the live differential gates the suite")
+		}
+		t.Skip("nvim is not installed; deterministic oracle regressions still run")
 	}
 	for i := range cases {
 		before := []rune(cases[i].Text)[:cases[i].Pos]
@@ -230,41 +236,68 @@ func TestNeovimDifferentialV031Acceptance(t *testing.T) {
 			linePrefix = prefix[at+1:]
 		}
 		cases[i].Col = len([]byte(linePrefix))
-		cases[i].Seq = strings.Join(cases[i].Keys, "")
+		if visual {
+			cases[i].Seq = visualOracleSeq(cases[i].Keys)
+		} else {
+			cases[i].Seq = strings.Join(cases[i].Keys, "")
+		}
 	}
 
+	for i, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			want := runOracleCase(t, cases[i], visual)
+			e := New(tc.Text)
+			e.SetMode(ModeNormal)
+			e.SetCursor(tc.Pos)
+			for _, key := range tc.Keys {
+				feedOracleKey(e, oracleKeyName(key))
+			}
+			if e.Text() != want.Text || e.Cursor() != want.Pos || e.Register() != want.Reg {
+				t.Fatalf("vimline=(text %q, cursor %d, reg %q), nvim=(text %q, cursor %d, reg %q)",
+					e.Text(), e.Cursor(), e.Register(), want.Text, want.Pos, want.Reg)
+			}
+		})
+	}
+}
+
+// runOracleCase drives one case through a fresh nvim process. nvim's
+// last-visual-op shape ([count]v reselect) is process-global state that no ex
+// or Lua command resets, so cases must not share a process.
+func runOracleCase(t *testing.T, tc oracleCase, visual bool) oracleResult {
+	t.Helper()
 	dir := t.TempDir()
-	inPath := filepath.Join(dir, "cases.json")
-	outPath := filepath.Join(dir, "results.json")
-	raw, err := json.Marshal(cases)
+	inPath := filepath.Join(dir, "case.json")
+	outPath := filepath.Join(dir, "result.json")
+	raw, err := json.Marshal([]oracleCase{tc})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(inPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	apply := "  vim.cmd('normal! ' .. c.seq)"
+	if visual {
+		apply = "  vim.fn.feedkeys(vim.api.nvim_replace_termcodes(c.seq, true, false, true), 'x')"
+	}
 	lua := `
 local input = os.getenv('VIMLINE_ORACLE_INPUT')
 local output = os.getenv('VIMLINE_ORACLE_OUTPUT')
-local cases = vim.json.decode(table.concat(vim.fn.readfile(input), "\n"))
-local results = {}
-for _, c in ipairs(cases) do
-  vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(c.text, "\n", { plain = true }))
-  vim.api.nvim_win_set_cursor(0, { c.row, c.col })
-  vim.fn.setreg('"', '')
-  vim.cmd('set undolevels=-1')
-  vim.cmd('set undolevels=1000')
-  vim.cmd('normal! ' .. c.seq)
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  local pos = 0
-  for line = 1, cursor[1] - 1 do
-    pos = pos + vim.str_utfindex(lines[line]) + 1
-  end
-  pos = pos + vim.str_utfindex(lines[cursor[1]]:sub(1, cursor[2]))
-  table.insert(results, { text = table.concat(lines, "\n"), pos = pos, reg = vim.fn.getreg('"') })
+local c = vim.json.decode(table.concat(vim.fn.readfile(input), "\n"))[1]
+vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(c.text, "\n", { plain = true }))
+vim.api.nvim_win_set_cursor(0, { c.row, c.col })
+vim.fn.setreg('"', '')
+vim.cmd('set undolevels=-1')
+vim.cmd('set undolevels=1000')
+` + apply + `
+local cursor = vim.api.nvim_win_get_cursor(0)
+local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+local pos = 0
+for line = 1, cursor[1] - 1 do
+  pos = pos + vim.str_utfindex(lines[line]) + 1
 end
-vim.fn.writefile({ vim.json.encode(results) }, output)
+pos = pos + vim.str_utfindex(lines[cursor[1]]:sub(1, cursor[2]))
+local result = { { text = table.concat(lines, "\n"), pos = pos, reg = vim.fn.getreg('"') } }
+vim.fn.writefile({ vim.json.encode(result) }, output)
 vim.cmd('qa!')
 `
 	luaPath := filepath.Join(dir, "oracle.lua")
@@ -284,37 +317,65 @@ vim.cmd('qa!')
 	if err := json.Unmarshal(resultRaw, &results); err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != len(cases) {
-		t.Fatalf("oracle returned %d results for %d cases", len(results), len(cases))
+	if len(results) != 1 {
+		t.Fatalf("oracle returned %d results for 1 case", len(results))
 	}
-	for i, tc := range cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			e := New(tc.Text)
-			e.SetMode(ModeNormal)
-			e.SetCursor(tc.Pos)
-			for _, key := range tc.Keys {
-				switch key {
-				case "\x1b":
-					key = "esc"
-				case "\x12":
-					key = "ctrl-r"
-				case "\x08":
-					key = "bs"
-				case "\r":
-					key = "enter"
-				}
-				e.Feed(key)
-			}
-			want := results[i]
-			if e.Text() != want.Text || e.Cursor() != want.Pos || e.Register() != want.Reg {
-				t.Fatalf("vimline=(text %q, cursor %d, reg %q), nvim=(text %q, cursor %d, reg %q)",
-					e.Text(), e.Cursor(), e.Register(), want.Text, want.Pos, want.Reg)
-			}
-		})
-	}
+	return results[0]
 }
 
 func splitOracleKeys(seq string) []string {
-	replacer := strings.NewReplacer("<esc>", "\x1b", "<ctrl-r>", "\x12", "<bs>", "\x08", "<cr>", "\r")
+	replacer := strings.NewReplacer(
+		"<esc>", "\x1b",
+		"<Esc>", "\x1b",
+		"<ctrl-r>", "\x12",
+		"<C-v>", "\x16",
+		"<c-v>", "\x16",
+		"<bs>", "\x08",
+		"<cr>", "\r",
+	)
 	return strings.Split(replacer.Replace(seq), "")
+}
+
+func oracleKeyName(key string) string {
+	switch key {
+	case "\x1b":
+		return "esc"
+	case "\x16":
+		return "ctrl-v"
+	case "\x12":
+		return "ctrl-r"
+	case "\x08":
+		return "bs"
+	case "\r":
+		return "enter"
+	}
+	return key
+}
+
+func feedOracleKey(e *Editor, key string) {
+	act := e.Feed(key)
+	if e.Mode() != ModeNormal {
+		return
+	}
+	lines := e.lineBounds()
+	li := e.lineIndexAt(lines, e.cursor)
+	switch act {
+	case ActDown:
+		li++
+	case ActUp:
+		li--
+	case ActFirst:
+		li = 0
+	case ActLast:
+		li = len(lines) - 1
+	default:
+		return
+	}
+	if li < 0 {
+		li = 0
+	}
+	if li >= len(lines) {
+		li = len(lines) - 1
+	}
+	e.placeAtColumn(lines[li][0], e.curswant)
 }
