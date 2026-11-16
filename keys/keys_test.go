@@ -21,6 +21,7 @@ func TestSplitBurstsKeepEveryKey(t *testing.T) {
 		{"\x0e", []string{"ctrl-n"}},
 		{"\x10", []string{"ctrl-p"}},
 		{"\x04", []string{"ctrl-d"}},
+		{"\x16", []string{"ctrl-v"}},
 		{"\x1b", []string{"esc"}},
 		{"\x1b[A", []string{"up"}},
 		{"\x1b[B", []string{"down"}},

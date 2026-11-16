@@ -5,9 +5,10 @@ machine lives here; every consumer renders.
 
 Three packages:
 
-- `vimline` - the editor: modal insert, normal, and replace states, motions,
-  operators with counts, text objects, search, marks, shifts, one unnamed
-  register, undo and redo, replace mode, dot repeat, and the `jj` exit idiom.
+- `vimline` - the editor: modal insert, normal, replace, and visual states,
+  motions, operators with counts, text objects, search, marks, shifts, one
+  unnamed register, undo and redo, replace mode, visual mode (charwise `v`,
+  linewise `V`, blockwise `ctrl-v`), dot repeat, and the `jj` exit idiom.
 - `vimline/duration` - the time grammar: `3h`, `2w`, `1d12h`, `tomorrow`,
   `clear`, resolving to an absolute time plus a human description.
 - `vimline/keys` - the chord layer: `Split` and `Dispatcher`, detailed below.
@@ -27,25 +28,60 @@ for {
     case vimline.ActUp, vimline.ActDown: // move the surrounding list
     }
 }
-v := e.View("/", true)        // Label, Text, Cursor, Mode, Pending, Count
+v := e.View("/", true)        // Label, Text, Cursor, Mode, Pending, Count,
+                              // SelActive/SelStart/SelEnd/VisualKind/SelRows
 ```
 
 `Feed` takes the same key names a terminal decoder produces: `enter`, `esc`,
 `bs`, `left`, `right`, `up`, `down`, `ctrl-u`, `ctrl-w`, `ctrl-k`, `ctrl-y`,
-`ctrl-r`, `ctrl-n`, `ctrl-p`, `ctrl-d`, or a single printable character.
+`ctrl-r`, `ctrl-n`, `ctrl-p`, `ctrl-d`, `ctrl-v`, or a single printable
+character.
+
+Visual mode: `v` / `V` / `ctrl-v` enter charwise, linewise, or blockwise
+selection. Motions expand the selection; `i`/`a` text objects set it; operators
+`d c y > < = ~ u U J` act on it. `o`/`O` swap endpoints. `esc` clears the
+selection without buffer or history mutation. `gv` reselects the prior visual
+range (`g` still returns `ActFirst` for field navigation; the following `v`
+completes the reselect). For a blockwise selection the faithful geometry is
+the per-row spans in `View.SelRows` (one inclusive span per selected row);
+`SelStart`/`SelEnd` stay a flat bounding range for compatibility.
 
 Known gap: search patterns use Go's `regexp` engine. Vim-specific pattern
-atoms are not translated, so Vim pattern syntax is not supported in v0.3.1.
+atoms are not translated, so Vim pattern syntax is not supported in v0.4.0.
 The Vim-to-RE2 translation layer and nvim differential pattern tests are
 tracked for a later release in `wiseman-tftd`.
 
-Known gaps recorded against nvim 0.12.5 (each verified live, none silently
-dropped): a counted `w`/`W` operator that ends in column 0 of a later line
+Known gaps recorded against the probe host binary nvim 0.12.4 (each
+verified live on that binary): a counted
+`w`/`W` operator that ends in column 0 of a later line
 joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
 `d'a`/`y'a` with the apostrophe mark run charwise where nvim is linewise; a
 charwise put of multi-line text leaves the cursor at the end of the put where
 nvim leaves it at the start; and `>>` places the cursor in column 0 where nvim
-keeps the virtual column (tabs are one rune here).
+keeps the virtual column (tabs are one rune here). Visual mode does not
+implement `p`, `P`, `r`, `/?` search, `n`/`N`, `ctrl-d`/`ctrl-u`, or mark jumps
+(`m`, `` ` ``, `'`, `[`, `]`); those keys are ignored and their operands are
+discarded so later keys are not misread. A text object
+with a charwise or linewise live selection extends word objects from the
+cursor end like nvim; quote, bracket, sentence, and paragraph objects keep
+the object span where nvim extends by its per-object rules (probed live:
+`vli"y` on `say "hi" now` yanks `"hi"` in nvim). Multi-row blockwise text
+objects keep the block rectangle; per-row word expansion is deferred as a
+declared gap this release (not implemented), although matched-column probes
+of `<C-v>jjiwd` on `abcd\nefgh\nijkl` matched nvim 0.12.4. Probes ran on
+nvim 0.12.4; the CI differential gate installs v0.12.5 and these gap notes
+were not re-probed there. On the probe binary `=` on a leading-tab line
+leaves the cursor at the last column while vimline preserves the cursor
+column as nvim does on space-indented lines; Visual
+`$` / MAXCOL virtual-column edges beyond the accepted unequal-line block `$`
+path are the same family as the `>>` virtual-column gap and are deferred - see
+task oracle notes when comparing. Within that deferral (probed on nvim 0.12.4):
+when the cursor row of a ragged `$` block ends before the block column, nvim
+moves the block's left edge to that row's EOL and records empty register lines
+for the short rows, where vimline keeps the anchor column (the short rows'
+empty register lines agree); when the cursor row is long and only other rows
+are ragged, nvim pads those rows' register lines with spaces where vimline
+records empty lines.
 
 ## Binding acceptance
 
@@ -100,7 +136,7 @@ without coupling releases.
 ## Install
 
 ```
-go get github.com/RooseveltAdvisors/vimline@v0.3.1
+go get github.com/RooseveltAdvisors/vimline@v0.4.0
 ```
 
 Tagged releases only. Pin deliberately; do not float a branch head. The pinned

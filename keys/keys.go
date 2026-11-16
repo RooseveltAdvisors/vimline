@@ -145,6 +145,9 @@ func Split(buf []byte) []string {
 		case b == 0x04:
 			out = append(out, "ctrl-d")
 			i++
+		case b == 0x16:
+			out = append(out, "ctrl-v")
+			i++
 		case b == 0x1b:
 			if name, n := decodeEscape(buf[i:]); n > 0 {
 				out = append(out, name)
