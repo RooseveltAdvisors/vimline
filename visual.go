@@ -1236,6 +1236,13 @@ func (e *Editor) feedVisual(key string) Action {
 		e.exitVisual(true)
 		e.commitCurswant()
 		return ActAccept
+	case "ctrl-u":
+		// Consumer (e.g. body editor) pages and extends the live selection.
+		e.count = 0
+		return ActPageUp
+	case "ctrl-d":
+		e.count = 0
+		return ActPageDown
 	}
 	e.count = 0
 	return ActStay
