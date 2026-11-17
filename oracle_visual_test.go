@@ -67,6 +67,9 @@ func TestNeovimDifferentialVisual(t *testing.T) {
 		{Name: "block put p on empty cursor line", Text: "abcd\nefgh\n\nqrst", Pos: 0, Keys: splitOracleKeys("<C-v>jlyjj0p")},
 		{Name: "block put pads empty register lines", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kyj0P")},
 		{Name: "block put empty row at buffer end", Text: "abc\nde\nz", Pos: 2, Keys: splitOracleKeys("<C-v>jyG0P")},
+		// Width-2 empty register row on a created line: nvim inserts raw (no
+		// width pad). Old vimline padded to width and left "  " on the new line.
+		{Name: "block put empty created row no width pad", Text: "abc\nde\nfghi\nz", Pos: 2, Keys: splitOracleKeys("<C-v>jjlyG0P")},
 		{Name: "block put pads short row on existing line", Text: "abc\nfgxy\nz", Pos: 2, Keys: splitOracleKeys("<C-v>jlyj0P")},
 		{Name: "block put counted created row", Text: "abc\nfgxy\nz", Pos: 2, Keys: splitOracleKeys("<C-v>jlyG02P")},
 		{Name: "ragged block left edge change", Text: "ab\nlongish", Pos: 8, Keys: splitOracleKeys("<C-v>kcXY<esc>")},

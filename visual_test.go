@@ -975,13 +975,45 @@ func TestGVReselectOnlyImmediatePair(t *testing.T) {
 	if e.Text() != "\nbb\ncc" || e.Register() != "aa" {
 		t.Fatalf("ggvld text = %q reg = %q", e.Text(), e.Register())
 	}
-	e = newVisualAt("aa\nbb\ncc", 3)
+	// Start at 0 so a stale gv reselect (0..3 from vj) shares SelStart with a
+	// fresh counted 2v (0..1). SelEnd is the discriminating property: reselect
+	// ends at 3, fresh counted entry ends at 1.
+	e = newVisualAt("aa\nbb\ncc", 0)
 	feedVisualSeq(e, "vj<esc>g2v")
 	if e.Mode() != ModeVisual {
 		t.Fatalf("mode = %v", e.Mode())
 	}
 	v := e.View("/", true)
 	if !v.SelActive || v.SelStart != 0 || v.SelEnd != 1 {
-		t.Fatalf("g2v selection = %+v want fresh at 0..1", v)
+		t.Fatalf("g2v selection = %+v want fresh at 0..1 (stale reselect ends at 3)", v)
+	}
+}
+
+func TestVisualCtrlDCtrlUReturnPageActs(t *testing.T) {
+	e := newVisualAt("aa\nbb\ncc\ndd", 0)
+	e.Feed("v")
+	e.Feed("l")
+	before := e.View("/", true)
+	act := e.Feed("ctrl-d")
+	if act != ActPageDown {
+		t.Fatalf("ctrl-d act = %v want ActPageDown", act)
+	}
+	if e.Mode() != ModeVisual {
+		t.Fatalf("ctrl-d mode = %v", e.Mode())
+	}
+	after := e.View("/", true)
+	if !after.SelActive || after.SelStart != before.SelStart || after.SelEnd != before.SelEnd {
+		t.Fatalf("ctrl-d selection changed: before=%+v after=%+v", before, after)
+	}
+	act = e.Feed("ctrl-u")
+	if act != ActPageUp {
+		t.Fatalf("ctrl-u act = %v want ActPageUp", act)
+	}
+	if e.Mode() != ModeVisual {
+		t.Fatalf("ctrl-u mode = %v", e.Mode())
+	}
+	after = e.View("/", true)
+	if !after.SelActive || after.SelStart != before.SelStart || after.SelEnd != before.SelEnd {
+		t.Fatalf("ctrl-u selection changed: before=%+v after=%+v", before, after)
 	}
 }

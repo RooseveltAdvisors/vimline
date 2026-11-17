@@ -47,7 +47,7 @@ the per-row spans in `View.SelRows` (one inclusive span per selected row);
 `SelStart`/`SelEnd` stay a flat bounding range for compatibility.
 
 Known gap: search patterns use Go's `regexp` engine. Vim-specific pattern
-atoms are not translated, so Vim pattern syntax is not supported in v0.4.0.
+atoms are not translated, so Vim pattern syntax is not supported in v0.4.1.
 The Vim-to-RE2 translation layer and nvim differential pattern tests are
 tracked for a later release in `wiseman-tftd`.
 
@@ -58,10 +58,12 @@ joins the lines where nvim stops at the line end (`d2w`, `c2w` on blanks);
 `d'a`/`y'a` with the apostrophe mark run charwise where nvim is linewise; a
 charwise put of multi-line text leaves the cursor at the end of the put where
 nvim leaves it at the start; and `>>` places the cursor in column 0 where nvim
-keeps the virtual column (tabs are one rune here). Visual mode does not
-implement `p`, `P`, `r`, `/?` search, `n`/`N`, `ctrl-d`/`ctrl-u`, or mark jumps
+	keeps the virtual column (tabs are one rune here). Visual mode does not
+implement `p`, `P`, `r`, `/?` search, `n`/`N`, or mark jumps
 (`m`, `` ` ``, `'`, `[`, `]`); those keys are ignored and their operands are
-discarded so later keys are not misread. A text object
+discarded so later keys are not misread. Visual `ctrl-d`/`ctrl-u` return
+`ActPageDown`/`ActPageUp` and keep the selection active so a consumer can
+extend it. A text object
 with a charwise or linewise live selection extends word objects from the
 cursor end like nvim; quote, bracket, sentence, and paragraph objects keep
 the object span where nvim extends by its per-object rules (probed live:
@@ -136,7 +138,7 @@ without coupling releases.
 ## Install
 
 ```
-go get github.com/RooseveltAdvisors/vimline@v0.4.0
+go get github.com/RooseveltAdvisors/vimline@v0.4.1
 ```
 
 Tagged releases only. Pin deliberately; do not float a branch head. The pinned
